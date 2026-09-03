@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import {
   X,
   Sparkles,
@@ -10,11 +11,12 @@ import {
   ArrowRight,
   ShieldCheck,
   ShoppingBag,
-  DollarSign,
+  IndianRupee,
   Plus,
   Minus,
   Sliders,
   AlertCircle,
+  Wallet,
 } from "lucide-react";
 import { InstagramPost } from "@/lib/instagramData";
 import { useCart } from "@/context/CartContext";
@@ -29,7 +31,7 @@ interface PackageItem {
 }
 
 interface InstagramBoostModalProps {
-  type: "followers" | "likes";
+  type: "followers" | "likes" | "views";
   targetUsername: string;
   avatarUrl: string;
   initialCount?: number;
@@ -46,27 +48,42 @@ export default function InstagramBoostModal({
   onClose,
 }: InstagramBoostModalProps) {
   const isFollowers = type === "followers";
+  const isViews = type === "views";
   const { addOrder } = useCart();
+  const { data: session } = useSession();
 
-  // Base rate per 1,000 from database (fallback to $8 / $4)
-  const [ratePer1k, setRatePer1k] = useState<number>(isFollowers ? 8.0 : 4.0);
+  // User wallet state
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [insufficientError, setInsufficientError] = useState<string | null>(null);
+
+  // Base rate per 1,000 from database (fallback to ₹80 / ₹40 / ₹20)
+  const [ratePer1k, setRatePer1k] = useState<number>(isFollowers ? 80.0 : isViews ? 20.0 : 40.0);
 
   // Preset packages: 1k, 10k, 100k, 1M
   const defaultFollowerPackages: PackageItem[] = [
-    { id: "pkg_followers_1k", amount: 1000, label: "1K Followers", price: 8.0, popular: false, tag: "Starter Growth" },
-    { id: "pkg_followers_10k", amount: 10000, label: "10K Followers", price: 76.0, popular: true, tag: "Most Popular" },
-    { id: "pkg_followers_100k", amount: 100000, label: "100K Followers", price: 720.0, popular: false, tag: "Pro Creator" },
-    { id: "pkg_followers_1m", amount: 1000000, label: "1M Followers", price: 6400.0, popular: false, tag: "Celebrity Fame" },
+    { id: "pkg_followers_1k", amount: 1000, label: "1K Followers", price: 80.0, popular: false, tag: "Starter Growth" },
+    { id: "pkg_followers_10k", amount: 10000, label: "10K Followers", price: 760.0, popular: true, tag: "Most Popular" },
+    { id: "pkg_followers_100k", amount: 100000, label: "100K Followers", price: 7200.0, popular: false, tag: "Pro Creator" },
+    { id: "pkg_followers_1m", amount: 1000000, label: "1M Followers", price: 64000.0, popular: false, tag: "Celebrity Fame" },
   ];
 
   const defaultLikesPackages: PackageItem[] = [
-    { id: "pkg_likes_1k", amount: 1000, label: "1K Likes", price: 4.0, popular: false, tag: "Starter Boost" },
-    { id: "pkg_likes_10k", amount: 10000, label: "10K Likes", price: 38.0, popular: true, tag: "Most Popular" },
-    { id: "pkg_likes_100k", amount: 100000, label: "100K Likes", price: 360.0, popular: false, tag: "Viral Hit" },
-    { id: "pkg_likes_1m", amount: 1000000, label: "1M Likes", price: 3200.0, popular: false, tag: "Explore Sensation" },
+    { id: "pkg_likes_1k", amount: 1000, label: "1K Likes", price: 40.0, popular: false, tag: "Starter Boost" },
+    { id: "pkg_likes_10k", amount: 10000, label: "10K Likes", price: 380.0, popular: true, tag: "Most Popular" },
+    { id: "pkg_likes_100k", amount: 100000, label: "100K Likes", price: 3600.0, popular: false, tag: "Viral Hit" },
+    { id: "pkg_likes_1m", amount: 1000000, label: "1M Likes", price: 32000.0, popular: false, tag: "Explore Sensation" },
   ];
 
-  const [packages, setPackages] = useState<PackageItem[]>(isFollowers ? defaultFollowerPackages : defaultLikesPackages);
+  const defaultViewsPackages: PackageItem[] = [
+    { id: "pkg_views_1k", amount: 1000, label: "1K Reel Views", price: 20.0, popular: false, tag: "Starter Views" },
+    { id: "pkg_views_10k", amount: 10000, label: "10K Reel Views", price: 190.0, popular: true, tag: "Most Popular" },
+    { id: "pkg_views_100k", amount: 100000, label: "100K Reel Views", price: 1800.0, popular: false, tag: "Viral Reel" },
+    { id: "pkg_views_1m", amount: 1000000, label: "1M Reel Views", price: 16000.0, popular: false, tag: "Explore Sensation" },
+  ];
+
+  const [packages, setPackages] = useState<PackageItem[]>(
+    isFollowers ? defaultFollowerPackages : isViews ? defaultViewsPackages : defaultLikesPackages
+  );
   const [selectedPackage, setSelectedPackage] = useState<PackageItem>(packages[1] || packages[0]);
   const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
   const [customAmountInput, setCustomAmountInput] = useState<string>("5000");
@@ -85,28 +102,32 @@ export default function InstagramBoostModal({
     return Math.round(raw * discount * 100) / 100;
   };
 
-  // Fetch dynamic packages and master rates from database
+  // Fetch dynamic packages, master rates, and user wallet
   useEffect(() => {
     async function loadDynamicPricing() {
       try {
-        const [pkgsRes, ratesRes] = await Promise.all([
+        const userEmail = session?.user?.email;
+        const [pkgsRes, ratesRes, walletRes] = await Promise.all([
           fetch(`/api/packages?type=${type}`, { cache: "no-store" }),
           fetch("/api/pricing/rates", { cache: "no-store" }),
+          userEmail ? fetch(`/api/wallet?user_email=${encodeURIComponent(userEmail)}`, { cache: "no-store" }) : null,
         ]);
 
-        let currentRate = isFollowers ? 8.0 : 4.0;
-        if (ratesRes.ok) {
+        let currentRate = isFollowers ? 80.0 : isViews ? 20.0 : 40.0;
+        if (ratesRes && ratesRes.ok) {
           const ratesJson = await ratesRes.json();
           if (ratesJson?.data) {
             const r = isFollowers
-              ? Number(ratesJson.data.rate_per_1000_followers) || 8.0
-              : Number(ratesJson.data.rate_per_1000_likes) || 4.0;
+              ? Number(ratesJson.data.rate_per_1000_followers) || 80.0
+              : isViews
+              ? Number(ratesJson.data.rate_per_1000_views) || 20.0
+              : Number(ratesJson.data.rate_per_1000_likes) || 40.0;
             currentRate = r;
             setRatePer1k(r);
           }
         }
 
-        if (pkgsRes.ok) {
+        if (pkgsRes && pkgsRes.ok) {
           const json = await pkgsRes.json();
           if (json && json.data && json.data.length > 0) {
             setPackages(json.data);
@@ -114,16 +135,25 @@ export default function InstagramBoostModal({
             setSelectedPackage(popular);
           }
         }
+
+        if (walletRes && walletRes.ok) {
+          const wData = await walletRes.json();
+          if (wData && typeof wData.wallet_balance === "number") {
+            setWalletBalance(wData.wallet_balance);
+          }
+        }
       } catch (e) {
         console.warn("Pricing DB notice:", e);
       }
     }
     loadDynamicPricing();
-  }, [type, isFollowers]);
+  }, [type, isFollowers, isViews, session?.user?.email]);
+
 
   // Handle custom manual input changes
   const handleCustomInputChange = (val: string) => {
     setCustomAmountInput(val);
+    setInsufficientError(null);
     const num = parseInt(val, 10);
     if (isNaN(num)) {
       setCustomError("Please enter a valid number");
@@ -146,6 +176,7 @@ export default function InstagramBoostModal({
     const rounded = Math.round(nextVal / 1000) * 1000;
     setCustomAmountInput(String(rounded));
     setCustomError("");
+    setInsufficientError(null);
   };
 
   // Determine current active boost amount and price
@@ -157,38 +188,44 @@ export default function InstagramBoostModal({
     ? calculatePriceForAmount(currentBoostAmount, ratePer1k)
     : (selectedPackage.price ?? calculatePriceForAmount(selectedPackage.amount, ratePer1k));
   const currentBoostLabel = isCustomMode
-    ? `+${currentBoostAmount >= 1000000 ? `${(currentBoostAmount / 1000000).toFixed(1).replace(".0", "")}M` : currentBoostAmount >= 1000 ? `${(currentBoostAmount / 1000).toFixed(0)}K` : currentBoostAmount.toLocaleString()} ${isFollowers ? "Followers" : "Likes"}`
+    ? `+${currentBoostAmount >= 1000000 ? `${(currentBoostAmount / 1000000).toFixed(1).replace(".0", "")}M` : currentBoostAmount >= 1000 ? `${(currentBoostAmount / 1000).toFixed(0)}K` : currentBoostAmount.toLocaleString()} ${isFollowers ? "Followers" : isViews ? "Reel Views" : "Likes"}`
     : selectedPackage.label;
 
-  const baseCount = initialCount || (isFollowers ? 1200 : 350);
+  const baseCount = initialCount || (isFollowers ? 1200 : isViews ? 5000 : 350);
   const approxAfter = baseCount + currentBoostAmount;
 
-  const handleStartBoost = () => {
+  const handleStartBoost = async () => {
     if (isCustomMode && !isCustomValid) {
       setCustomError("Please enter a valid amount (minimum 1,000 in multiples of 1,000)");
       return;
     }
 
+    setInsufficientError(null);
     setIsProcessing(true);
 
-    setTimeout(() => {
-      // Add to live Cart & MySQL Database Records
-      addOrder({
-        type,
-        username: targetUsername,
-        avatarUrl,
-        postThumbnail: targetPost?.imageUrl,
-        postId: targetPost?.id,
-        packageAmount: currentBoostAmount,
-        packageLabel: currentBoostLabel,
-        price: currentBoostPrice,
-        initialCount: baseCount,
-        approxAfterCount: approxAfter,
-      });
+    // Call addOrder which executes database deduction first
+    const res = await addOrder({
+      type,
+      username: targetUsername,
+      avatarUrl,
+      postThumbnail: targetPost?.imageUrl,
+      postId: targetPost?.id,
+      packageAmount: currentBoostAmount,
+      packageLabel: currentBoostLabel,
+      price: currentBoostPrice,
+      initialCount: baseCount,
+      approxAfterCount: approxAfter,
+    });
 
-      setIsProcessing(false);
-      onClose();
-    }, 600);
+    setIsProcessing(false);
+
+    if (!res.success) {
+      setInsufficientError(res.error || "Insufficient wallet balance to place this order.");
+      return;
+    }
+
+    // Success: Modal closes and cart drawer starts increasing followers/likes/views
+    onClose();
   };
 
   return (
@@ -209,11 +246,13 @@ export default function InstagramBoostModal({
           </div>
 
           <h2 className="text-2xl font-extrabold tracking-tight">
-            {isFollowers ? "Increase Instagram Followers" : "Increase Post & Reel Likes"}
+            {isFollowers ? "Increase Instagram Followers" : isViews ? "Increase Reel Views" : "Increase Post & Reel Likes"}
           </h2>
           <p className="text-white/80 text-xs mt-1">
             {isFollowers
               ? `Boost genuine followers & organic reach for @${targetUsername}`
+              : isViews
+              ? `Boost genuine high-retention views on this reel for @${targetUsername}`
               : `Boost high-engagement likes on this media for @${targetUsername}`}
           </p>
         </div>
@@ -244,6 +283,8 @@ export default function InstagramBoostModal({
               <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                 {isFollowers
                   ? `Current: ${initialCount.toLocaleString()} followers`
+                  : isViews
+                  ? `Current: ${initialCount.toLocaleString()} reel views`
                   : `Current: ${initialCount.toLocaleString()} likes`}
               </p>
             </div>
@@ -253,6 +294,7 @@ export default function InstagramBoostModal({
             </div>
           </div>
 
+
           {/* Section 1: Standard Preset Packages (1k, 10k, 100k, 1M) */}
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -260,7 +302,7 @@ export default function InstagramBoostModal({
                 Select {isFollowers ? "Followers" : "Likes"} Package
               </label>
               <span className="text-[11px] font-semibold text-indigo-500 dark:text-indigo-400">
-                ${ratePer1k.toFixed(2)} / 1K Base Rate
+                ₹{ratePer1k.toFixed(2)} / 1K Base Rate
               </span>
             </div>
 
@@ -299,7 +341,7 @@ export default function InstagramBoostModal({
                       </p>
                       {typeof pkg.price === "number" && (
                         <span className="font-extrabold text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-md">
-                          ${pkg.price.toFixed(2)}
+                          ₹{pkg.price.toFixed(2)}
                         </span>
                       )}
                     </div>
@@ -353,7 +395,7 @@ export default function InstagramBoostModal({
                     className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-extrabold text-slate-900 dark:text-white focus:outline-hidden focus:border-indigo-500 shadow-inner"
                   />
                   <span className="absolute right-3 top-2.5 text-xs font-bold text-slate-400">
-                    {isFollowers ? "Followers" : "Likes"}
+                    {isFollowers ? "Followers" : isViews ? "Reel Views" : "Likes"}
                   </span>
                 </div>
 
@@ -409,13 +451,14 @@ export default function InstagramBoostModal({
               ) : isCustomMode ? (
                 <div className="flex items-center justify-between text-xs pt-1 border-t border-indigo-100 dark:border-indigo-900/40">
                   <span className="text-slate-500 dark:text-slate-400 font-medium">
-                    Calculated Price for {parsedCustom.toLocaleString()} {isFollowers ? "followers" : "likes"}:
+                    Calculated Price for {parsedCustom.toLocaleString()} {isFollowers ? "followers" : isViews ? "reel views" : "likes"}:
                   </span>
                   <span className="text-sm font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                    ${calculatePriceForAmount(parsedCustom, ratePer1k).toFixed(2)}
+                    ₹{calculatePriceForAmount(parsedCustom, ratePer1k).toFixed(2)}
                   </span>
                 </div>
               ) : null}
+
             </div>
           </div>
 
@@ -438,6 +481,41 @@ export default function InstagramBoostModal({
             </div>
           </div>
 
+          {/* User Wallet Balance Summary */}
+          <div className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-500">
+                <Wallet className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-medium">Your Wallet Balance:</span>
+                <span className="font-extrabold text-slate-900 dark:text-white text-sm font-mono">
+                  ₹{walletBalance !== null ? walletBalance.toFixed(2) : "50.00"}
+                </span>
+              </div>
+            </div>
+
+            <div className="text-right">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-medium">Order Total:</span>
+              <span className="font-black text-pink-600 dark:text-pink-400 text-sm font-mono">
+                ₹{currentBoostPrice.toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          {/* Insufficient Balance Alert */}
+          {insufficientError && (
+            <div className="p-3.5 rounded-2xl bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800/60 text-xs text-red-600 dark:text-red-400 font-bold flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1 flex-1">
+                <p>{insufficientError}</p>
+                <p className="text-[11px] font-normal text-slate-600 dark:text-slate-400">
+                  Please go to the <strong>Wallet</strong> tab in the navigation to top up your wallet.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Action Button: Add to Cart & Start Boost */}
           <button
             type="button"
@@ -454,7 +532,7 @@ export default function InstagramBoostModal({
               <>
                 <ShoppingBag className="w-4 h-4" />
                 <span>
-                  Order {currentBoostLabel} - ${currentBoostPrice.toFixed(2)} (Add to Cart)
+                  Order {currentBoostLabel} - ₹{currentBoostPrice.toFixed(2)} (Add to Cart)
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </>

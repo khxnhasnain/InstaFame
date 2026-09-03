@@ -38,7 +38,10 @@ venv.bak/
 
 # Database & local buffer
 backend/fallback_db.json
+backend/sessions/
+backend/scratch/
 *.sqlite3
+*.tsbuildinfo
 
 # IDE / OS
 .DS_Store

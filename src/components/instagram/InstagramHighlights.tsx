@@ -25,10 +25,18 @@ export default function InstagramHighlights({ highlights, username }: Highlights
           >
             <div className="w-[70px] h-[70px] md:w-[77px] md:h-[77px] rounded-full p-[2px] border border-slate-300 dark:border-slate-700 group-hover:border-slate-400 dark:group-hover:border-slate-500 transition-colors flex items-center justify-center">
               <img
-                src={item.coverUrl}
+                src={
+                  item.coverUrl?.startsWith("http")
+                    ? `/api/image-proxy?url=${encodeURIComponent(item.coverUrl)}`
+                    : item.coverUrl || ""
+                }
                 alt={item.title}
                 referrerPolicy="no-referrer"
                 className="w-full h-full rounded-full object-cover p-[2px] bg-white dark:bg-slate-900 group-hover:scale-105 transition-transform"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src =
+                    "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80";
+                }}
               />
             </div>
             <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[75px]">

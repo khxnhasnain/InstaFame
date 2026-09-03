@@ -28,12 +28,17 @@ export default function InstagramHeader({ profile }: InstagramHeaderProps) {
             {/* Gradient Ring */}
             <div className="w-[90px] h-[90px] md:w-[154px] md:h-[154px] rounded-full p-[3px] ig-gradient-border flex items-center justify-center shadow-sm">
               <img
-                src={profile.avatarUrl}
+                src={
+                  profile.avatarUrl?.startsWith("http")
+                    ? `/api/image-proxy?url=${encodeURIComponent(profile.avatarUrl)}`
+                    : profile.avatarUrl || ""
+                }
                 alt={profile.fullName}
                 referrerPolicy="no-referrer"
                 className="w-full h-full rounded-full object-cover border-2 border-white dark:border-slate-900 bg-slate-100 dark:bg-slate-800"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23cbd5e1'><circle cx='12' cy='12' r='10' fill='%23f1f5f9'/><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z' fill='%2394a3b8'/></svg>";
+                  (e.target as HTMLImageElement).src =
+                    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23cbd5e1'><circle cx='12' cy='12' r='10' fill='%23f1f5f9'/><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z' fill='%2394a3b8'/></svg>";
                 }}
               />
             </div>
@@ -65,11 +70,10 @@ export default function InstagramHeader({ profile }: InstagramHeaderProps) {
 
               <button
                 onClick={() => setIsFollowing(!isFollowing)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
-                  isFollowing
+                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${isFollowing
                     ? "bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-white hover:bg-slate-300"
                     : "bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white"
-                }`}
+                  }`}
               >
                 {isFollowing ? "Following" : "Follow"}
               </button>

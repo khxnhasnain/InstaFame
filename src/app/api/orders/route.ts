@@ -35,16 +35,53 @@ export async function POST(request: NextRequest) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const data = await res.json();
         return NextResponse.json(data);
+      } else {
+        return NextResponse.json(
+          { error: data.detail || data.error || "Failed to process order" },
+          { status: res.status }
+        );
       }
     } catch {
       // Backend offline fallback
     }
+
 
     return NextResponse.json({ success: true, data: body, message: "Order recorded locally" });
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || "Failed to record order" }, { status: 500 });
   }
 }
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const orderId = body.id || body.order_id;
+
+    if (!orderId) {
+      return NextResponse.json({ error: "Order ID is required" }, { status: 400 });
+    }
+
+    try {
+      const url = `${PYTHON_BACKEND_URL}/api/orders/${encodeURIComponent(orderId)}/status`;
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        return NextResponse.json(data);
+      }
+    } catch {
+      // Backend offline fallback
+    }
+
+    return NextResponse.json({ success: true, data: body, message: "Order status updated locally" });
+  } catch (error: any) {
+    return NextResponse.json({ error: error?.message || "Failed to update order" }, { status: 500 });
+  }
+}
+

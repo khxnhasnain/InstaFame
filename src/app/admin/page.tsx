@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import {
   Users,
-  DollarSign,
+  IndianRupee,
   TrendingUp,
   ShoppingBag,
   Database,
@@ -22,11 +22,15 @@ import {
   Check,
   Zap,
   Sliders,
+  Wallet,
+  PlusCircle,
+  Play,
+  Eye,
 } from "lucide-react";
 
 interface Package {
   id: string;
-  service_type: "followers" | "likes";
+  service_type: "followers" | "likes" | "views";
   amount: number;
   label: string;
   price: number;
@@ -44,6 +48,7 @@ interface UserRecord {
   provider: string;
   role: string;
   total_orders_count: number;
+  wallet_balance?: number;
   last_login: string;
   created_at: string;
 }
@@ -51,7 +56,7 @@ interface UserRecord {
 interface OrderRecord {
   id: string;
   user_email: string;
-  service_type: "followers" | "likes";
+  service_type: "followers" | "likes" | "views";
   target_username: string;
   target_post_url?: string;
   package_amount: number;
@@ -68,10 +73,13 @@ interface AdminStats {
   total_users: number;
   total_orders: number;
   total_revenue: number;
+  total_wallet_balance?: number;
   total_followers_boosted: number;
   total_likes_boosted: number;
+  total_views_boosted?: number;
   database_engine: string;
 }
+
 
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -101,46 +109,78 @@ export default function AdminDashboardPage() {
   const [saveMessage, setSaveMessage] = useState<{ id: string; text: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Master rate per 1,000 states
-  const [rateFollowers1k, setRateFollowers1k] = useState<number>(8.00);
-  const [rateLikes1k, setRateLikes1k] = useState<number>(4.00);
-  const [isSavingRates, setIsSavingRates] = useState(false);
-  const [ratesSuccessMsg, setRatesSuccessMsg] = useState(false);
-
   // Editable package states
   const [editingPackages, setEditingPackages] = useState<{ [id: string]: Package }>({});
 
-  const fetchData = async () => {
+  // Admin Credit Wallet State
+  const [walletModalUser, setWalletModalUser] = useState<UserRecord | null>(null);
+  const [addAmount, setAddAmount] = useState<string>("500");
+  const [isAddingFunds, setIsAddingFunds] = useState<boolean>(false);
+  const [fundSuccessMsg, setFundSuccessMsg] = useState<string | null>(null);
+
+  const handleCreditWallet = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!walletModalUser || !addAmount) return;
+    const num = parseFloat(addAmount);
+    if (isNaN(num) || num <= 0) return;
+
+    setIsAddingFunds(true);
+    try {
+      const res = await fetch("/api/wallet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_email: walletModalUser.email, amount: num }),
+      });
+      if (res.ok) {
+        setFundSuccessMsg(`Successfully credited ₹${num.toFixed(2)} to ${walletModalUser.email}`);
+        setTimeout(() => {
+          setFundSuccessMsg(null);
+          setWalletModalUser(null);
+          fetchData(true);
+        }, 1200);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsAddingFunds(false);
+    }
+  };
+
+  const isInputFocused = () => {
+    if (typeof document === "undefined") return false;
+    const active = document.activeElement;
+    return active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
+  };
+
+  const fetchData = async (force: boolean = false) => {
     setIsLoading(true);
     try {
-      const [statsRes, pkgsRes, usersRes, ordersRes, ratesRes] = await Promise.all([
-        fetch("/api/admin/stats", { cache: "no-store" }),
-        fetch("/api/packages", { cache: "no-store" }),
-        fetch("/api/users", { cache: "no-store" }),
-        fetch("/api/orders", { cache: "no-store" }),
-        fetch("/api/pricing/rates", { cache: "no-store" }),
+      const ts = Date.now();
+      const [statsRes, pkgsRes, usersRes, ordersRes] = await Promise.all([
+        fetch(`/api/admin/stats?t=${ts}`, { cache: "no-store" }),
+        fetch(`/api/packages?t=${ts}`, { cache: "no-store" }),
+        fetch(`/api/users?t=${ts}`, { cache: "no-store" }),
+        fetch(`/api/orders?t=${ts}`, { cache: "no-store" }),
       ]);
 
       if (statsRes.ok) {
         const d = await statsRes.json();
         setStats(d.data);
       }
-      if (ratesRes.ok) {
-        const d = await ratesRes.json();
-        if (d?.data) {
-          setRateFollowers1k(Number(d.data.rate_per_1000_followers) || 8.00);
-          setRateLikes1k(Number(d.data.rate_per_1000_likes) || 4.00);
+
+      // Only update editable inputs if the user is not actively typing/focused, or if explicitly forced
+      if (!isInputFocused() || force) {
+        if (pkgsRes.ok) {
+          const d = await pkgsRes.json();
+          setPackages(d.data || []);
+          const map: { [id: string]: Package } = {};
+          (d.data || []).forEach((p: Package) => {
+            map[p.id] = { ...p };
+          });
+          setEditingPackages(map);
         }
       }
-      if (pkgsRes.ok) {
-        const d = await pkgsRes.json();
-        setPackages(d.data || []);
-        const map: { [id: string]: Package } = {};
-        (d.data || []).forEach((p: Package) => {
-          map[p.id] = { ...p };
-        });
-        setEditingPackages(map);
-      }
+
       if (usersRes.ok) {
         const d = await usersRes.json();
         setUsers(d.data || []);
@@ -157,36 +197,23 @@ export default function AdminDashboardPage() {
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData(true);
+
+    // Auto-sync when returning to the tab (if user is not actively typing)
+    const handleFocus = () => {
+      if (!isInputFocused()) {
+        fetchData();
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+    };
   }, []);
 
-  const handleSaveMasterRates = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingRates(true);
-    setRatesSuccessMsg(false);
-
-    try {
-      const res = await fetch("/api/pricing/rates", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rate_per_1000_followers: rateFollowers1k,
-          rate_per_1000_likes: rateLikes1k,
-          auto_update_packages: true,
-        }),
-      });
-
-      if (res.ok) {
-        setRatesSuccessMsg(true);
-        await fetchData();
-        setTimeout(() => setRatesSuccessMsg(false), 3500);
-      }
-    } catch (err) {
-      console.error("Failed to save master rates:", err);
-    } finally {
-      setIsSavingRates(false);
-    }
-  };
+  const [isSavingAllPackages, setIsSavingAllPackages] = useState(false);
+  const [saveAllSuccessMsg, setSaveAllSuccessMsg] = useState(false);
 
   const handlePriceChange = (id: string, field: keyof Package, value: any) => {
     setEditingPackages((prev) => ({
@@ -198,44 +225,70 @@ export default function AdminDashboardPage() {
     }));
   };
 
-  const handleSavePackage = async (id: string) => {
-    const pkg = editingPackages[id];
-    if (!pkg) return;
+  const handleSaveAllPackages = async () => {
+    const allPackagesToSave = [
+      ...followerPackages,
+      ...likePackages,
+      ...viewsPackages,
+    ];
+    if (!allPackagesToSave.length) return;
 
-    setIsSaving(id);
-    setSaveMessage(null);
+    setIsSavingAllPackages(true);
+    setSaveAllSuccessMsg(false);
 
     try {
-      const res = await fetch("/api/packages", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: pkg.id,
-          price: parseFloat(String(pkg.price)),
-          amount: parseInt(String(pkg.amount)),
-          label: pkg.label,
-          tag: pkg.tag,
-          popular: pkg.popular,
-          is_active: pkg.is_active,
-        }),
+      await Promise.all(
+        allPackagesToSave.map((pkg) =>
+          fetch("/api/packages", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: pkg.id,
+              price: parseFloat(String(pkg.price)),
+              amount: parseInt(String(pkg.amount)),
+              label: pkg.label,
+              tag: pkg.tag,
+              popular: pkg.popular,
+              is_active: pkg.is_active,
+            }),
+          })
+        )
+      );
+
+      setSaveAllSuccessMsg(true);
+      setPackages((prev) => {
+        const next = [...prev];
+        allPackagesToSave.forEach((pkg) => {
+          const idx = next.findIndex((p) => p.id === pkg.id);
+          if (idx >= 0) next[idx] = { ...pkg };
+          else next.push({ ...pkg });
+        });
+        return next;
       });
 
-      if (res.ok) {
-        setSaveMessage({ id, text: "Price Saved to Database!" });
-        setPackages((prev) => prev.map((p) => (p.id === id ? { ...pkg } : p)));
-        setTimeout(() => setSaveMessage(null), 3000);
-      } else {
-        setSaveMessage({ id, text: "Failed to save" });
-      }
-    } catch {
-      setSaveMessage({ id, text: "Error saving" });
+      setTimeout(() => setSaveAllSuccessMsg(false), 3500);
+    } catch (err) {
+      console.error("Failed to save all packages:", err);
     } finally {
-      setIsSaving(null);
+      setIsSavingAllPackages(false);
     }
   };
 
-  const followerPackages = Object.values(editingPackages).filter((p) => p.service_type === "followers");
-  const likePackages = Object.values(editingPackages).filter((p) => p.service_type === "likes");
+  // Helper to ensure clean deduplicated packages by service type & amount (prioritizing pkg_ prefix)
+  const getUniquePackages = (pkgs: Package[], service: "followers" | "likes" | "views") => {
+    const list = pkgs.filter((p) => p.service_type === service);
+    const map = new Map<number, Package>();
+    list.forEach((p) => {
+      if (!map.has(p.amount) || p.id.startsWith("pkg_")) {
+        map.set(p.amount, p);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.amount - b.amount);
+  };
+
+  const followerPackages = getUniquePackages(Object.values(editingPackages), "followers");
+  const likePackages = getUniquePackages(Object.values(editingPackages), "likes");
+  const viewsPackages = getUniquePackages(Object.values(editingPackages), "views");
 
   const filteredUsers = users.filter(
     (u) =>
@@ -305,21 +358,26 @@ export default function AdminDashboardPage() {
                 <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
                   InstaFame Database & Pricing Manager
                 </h1>
-                <p className="text-xs text-slate-400">
-                  Manage price per 1,000 followers and likes, view registered users, and track booster transactions.
-                </p>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center flex-wrap gap-3">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-2 bg-slate-800/90 hover:bg-slate-800 text-slate-200 hover:text-white text-xs font-extrabold px-4 py-2.5 rounded-2xl transition-all border border-slate-700 hover:border-pink-500/40 hover:shadow-lg hover:shadow-pink-500/10 cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4 text-pink-400" />
+              <span>Back to Dashboard</span>
+            </Link>
+
             <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-800/60 px-3.5 py-1.5 rounded-full text-xs font-bold text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
               <span>{stats?.database_engine || "MySQL Engine: Active"}</span>
             </div>
 
             <button
-              onClick={fetchData}
+              onClick={() => fetchData(true)}
               disabled={isLoading}
               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-4 py-2.5 rounded-2xl transition-all border border-slate-700 cursor-pointer"
             >
@@ -330,14 +388,14 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* Overview Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 sm:gap-4">
           <div className="bg-slate-900/60 border border-slate-800 p-4 sm:p-5 rounded-2xl space-y-1">
             <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
               <span>Total Revenue</span>
-              <DollarSign className="w-4 h-4 text-emerald-400" />
+              <IndianRupee className="w-4 h-4 text-emerald-400" />
             </div>
             <p className="text-2xl font-black text-white">
-              ${(stats?.total_revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₹{(stats?.total_revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
             <p className="text-[11px] text-emerald-400 font-medium">From Boost Orders</p>
           </div>
@@ -375,7 +433,7 @@ export default function AdminDashboardPage() {
             <p className="text-[11px] text-sky-400 font-medium">Total Followers Added</p>
           </div>
 
-          <div className="bg-slate-900/60 border border-slate-800 p-4 sm:p-5 rounded-2xl space-y-1 col-span-2 md:col-span-1">
+          <div className="bg-slate-900/60 border border-slate-800 p-4 sm:p-5 rounded-2xl space-y-1">
             <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
               <span>Likes Boosted</span>
               <Heart className="w-4 h-4 text-rose-400" />
@@ -385,29 +443,38 @@ export default function AdminDashboardPage() {
             </p>
             <p className="text-[11px] text-rose-400 font-medium">Total Likes Added</p>
           </div>
+
+          <div className="bg-slate-900/60 border border-slate-800 p-4 sm:p-5 rounded-2xl space-y-1">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
+              <span>Reel Views Boosted</span>
+              <Play className="w-4 h-4 text-purple-400" />
+            </div>
+            <p className="text-2xl font-black text-white">
+              +{(stats?.total_views_boosted || 0).toLocaleString()}
+            </p>
+            <p className="text-[11px] text-purple-400 font-medium">Total Reel Views Added</p>
+          </div>
         </div>
 
         {/* Tab Navigation */}
         <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
           <button
             onClick={() => setActiveTab("pricing")}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-extrabold text-sm transition-all cursor-pointer ${
-              activeTab === "pricing"
-                ? "bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 text-white shadow-lg shadow-pink-500/20"
-                : "text-slate-400 hover:text-white bg-slate-900/40 hover:bg-slate-900 border border-slate-800"
-            }`}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-extrabold text-sm transition-all cursor-pointer ${activeTab === "pricing"
+              ? "bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 text-white shadow-lg shadow-pink-500/20"
+              : "text-slate-400 hover:text-white bg-slate-900/40 hover:bg-slate-900 border border-slate-800"
+              }`}
           >
-            <DollarSign className="w-4 h-4" />
+            <IndianRupee className="w-4 h-4" />
             <span>Manage Pricing &amp; Rates</span>
           </button>
 
           <button
             onClick={() => setActiveTab("users")}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-extrabold text-sm transition-all cursor-pointer ${
-              activeTab === "users"
-                ? "bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 text-white shadow-lg shadow-pink-500/20"
-                : "text-slate-400 hover:text-white bg-slate-900/40 hover:bg-slate-900 border border-slate-800"
-            }`}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-extrabold text-sm transition-all cursor-pointer ${activeTab === "users"
+              ? "bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 text-white shadow-lg shadow-pink-500/20"
+              : "text-slate-400 hover:text-white bg-slate-900/40 hover:bg-slate-900 border border-slate-800"
+              }`}
           >
             <Users className="w-4 h-4" />
             <span>Login Users Database ({users.length})</span>
@@ -415,11 +482,10 @@ export default function AdminDashboardPage() {
 
           <button
             onClick={() => setActiveTab("records")}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-extrabold text-sm transition-all cursor-pointer ${
-              activeTab === "records"
-                ? "bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 text-white shadow-lg shadow-pink-500/20"
-                : "text-slate-400 hover:text-white bg-slate-900/40 hover:bg-slate-900 border border-slate-800"
-            }`}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-extrabold text-sm transition-all cursor-pointer ${activeTab === "records"
+              ? "bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 text-white shadow-lg shadow-pink-500/20"
+              : "text-slate-400 hover:text-white bg-slate-900/40 hover:bg-slate-900 border border-slate-800"
+              }`}
           >
             <ShoppingBag className="w-4 h-4" />
             <span>Growth Booster Records ({orders.length})</span>
@@ -429,123 +495,19 @@ export default function AdminDashboardPage() {
         {/* Tab 1: Pricing & Amount Manager */}
         {activeTab === "pricing" && (
           <div className="space-y-8 animate-in fade-in duration-200">
-            {/* MASTER 1,000 RATE CONTROLLER CARD */}
-            <div className="bg-gradient-to-br from-indigo-950/70 via-slate-900 to-purple-950/60 border-2 border-indigo-500/40 p-6 sm:p-8 rounded-3xl shadow-2xl space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-3 bg-indigo-600 rounded-2xl text-white shadow-lg shadow-indigo-600/30">
-                    <Sliders className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-black text-white flex items-center gap-2">
-                      <span>Rate Controller: Price per 1,000 Followers &amp; Likes</span>
-                      <span className="text-[10px] uppercase font-bold bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-500/30">
-                        Master Database Rates
-                      </span>
-                    </h2>
-                    <p className="text-xs text-slate-300">
-                      Change the base rate for 1,000 followers or 1,000 likes here. It automatically calculates and updates all packages in the frontend UI in real-time!
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <form onSubmit={handleSaveMasterRates} className="grid grid-cols-1 md:grid-cols-3 gap-5 items-end">
-                {/* Rate Per 1,000 Followers */}
-                <div className="space-y-2 bg-slate-950/60 border border-slate-800 p-4 rounded-2xl">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-pink-400 flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5" />
-                    <span>Price per 1,000 Followers ($ USD)</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-lg">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.10"
-                      value={rateFollowers1k}
-                      onChange={(e) => setRateFollowers1k(parseFloat(e.target.value) || 0)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-2.5 text-lg font-black text-white focus:outline-hidden focus:border-pink-500 shadow-inner"
-                    />
-                  </div>
-                  <p className="text-[10px] text-slate-400">
-                    1K = ${(rateFollowers1k).toFixed(2)} | 10K = ${(rateFollowers1k * 10 * 0.95).toFixed(2)} | 100K = ${(rateFollowers1k * 100 * 0.90).toFixed(2)} | 1M = ${(rateFollowers1k * 1000 * 0.80).toFixed(2)}
-                  </p>
-                </div>
-
-                {/* Rate Per 1,000 Likes */}
-                <div className="space-y-2 bg-slate-950/60 border border-slate-800 p-4 rounded-2xl">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-                    <Heart className="w-3.5 h-3.5" />
-                    <span>Price per 1,000 Likes ($ USD)</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-lg">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.10"
-                      value={rateLikes1k}
-                      onChange={(e) => setRateLikes1k(parseFloat(e.target.value) || 0)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-2.5 text-lg font-black text-white focus:outline-hidden focus:border-indigo-500 shadow-inner"
-                    />
-                  </div>
-                  <p className="text-[10px] text-slate-400">
-                    1K = ${(rateLikes1k).toFixed(2)} | 10K = ${(rateLikes1k * 10 * 0.95).toFixed(2)} | 100K = ${(rateLikes1k * 100 * 0.90).toFixed(2)} | 1M = ${(rateLikes1k * 1000 * 0.80).toFixed(2)}
-                  </p>
-                </div>
-
-                {/* Save Master Rates Button */}
-                <div>
-                  <button
-                    type="submit"
-                    disabled={isSavingRates}
-                    className={`w-full py-4 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg active:scale-98 ${
-                      ratesSuccessMsg
-                        ? "bg-emerald-600 text-white shadow-emerald-500/25"
-                        : "bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 hover:opacity-95 text-white shadow-pink-500/25"
-                    }`}
-                  >
-                    {isSavingRates ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Updating MySQL Database...</span>
-                      </>
-                    ) : ratesSuccessMsg ? (
-                      <>
-                        <Check className="w-5 h-5 text-white animate-bounce" />
-                        <span>Rates &amp; Packages Updated!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Save className="w-4 h-4" />
-                        <span>Save &amp; Update All Prices in UI</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-
             {/* Individual Follower Packages Section */}
             <div className="space-y-4">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 pb-1">
                 <div className="p-2 rounded-xl bg-pink-500/20 text-pink-400">
                   <Users className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-white">Instagram Followers Packages (MySQL Table)</h2>
-                  <p className="text-xs text-slate-400">
-                    You can also override individual package amounts or prices below.
-                  </p>
+                  <h2 className="text-lg font-bold text-white">Instagram Followers Packages</h2>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {followerPackages.map((pkg) => {
-                  const isSavingThis = isSaving === pkg.id;
-                  const isSavedThis = saveMessage?.id === pkg.id;
-
                   return (
                     <div
                       key={pkg.id}
@@ -563,21 +525,7 @@ export default function AdminDashboardPage() {
                       <div className="space-y-3">
                         <div>
                           <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
-                            Followers Amount
-                          </label>
-                          <input
-                            type="number"
-                            value={pkg.amount}
-                            onChange={(e) =>
-                              handlePriceChange(pkg.id, "amount", parseInt(e.target.value) || 0)
-                            }
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm font-bold text-white focus:outline-hidden focus:border-pink-500"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
-                            Package Label
+                            Package
                           </label>
                           <input
                             type="text"
@@ -589,49 +537,22 @@ export default function AdminDashboardPage() {
 
                         <div>
                           <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
-                            Price ($ USD)
+                            Price (₹ INR)
                           </label>
                           <div className="relative">
-                            <span className="absolute left-3 top-2 text-slate-500 font-bold">$</span>
+                            <span className="absolute left-3 top-2 text-slate-500 font-bold">₹</span>
                             <input
-                              type="number"
-                              step="0.01"
+                              type="text"
+                              inputMode="decimal"
                               value={pkg.price}
                               onChange={(e) =>
-                                handlePriceChange(pkg.id, "price", parseFloat(e.target.value) || 0)
+                                handlePriceChange(pkg.id, "price", e.target.value)
                               }
                               className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-7 pr-3 py-2 text-base font-extrabold text-emerald-400 focus:outline-hidden focus:border-emerald-500"
                             />
                           </div>
                         </div>
                       </div>
-
-                      <button
-                        onClick={() => handleSavePackage(pkg.id)}
-                        disabled={isSavingThis}
-                        className={`w-full py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                          isSavedThis
-                            ? "bg-emerald-600 text-white"
-                            : "bg-gradient-to-r from-instagram-orange to-instagram-pink hover:opacity-90 text-white"
-                        }`}
-                      >
-                        {isSavingThis ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Saving...</span>
-                          </>
-                        ) : isSavedThis ? (
-                          <>
-                            <Check className="w-3.5 h-3.5" />
-                            <span>{saveMessage?.text}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Save className="w-3.5 h-3.5" />
-                            <span>Save Item Price</span>
-                          </>
-                        )}
-                      </button>
                     </div>
                   );
                 })}
@@ -640,23 +561,17 @@ export default function AdminDashboardPage() {
 
             {/* Individual Likes Packages Section */}
             <div className="space-y-4 pt-4 border-t border-slate-800">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 pb-1">
                 <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400">
                   <Heart className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-white">Post &amp; Reel Likes Packages (MySQL Table)</h2>
-                  <p className="text-xs text-slate-400">
-                    Individual packages for media and reel boost orders.
-                  </p>
+                  <h2 className="text-lg font-bold text-white">Post &amp; Reel Likes Packages</h2>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {likePackages.map((pkg) => {
-                  const isSavingThis = isSaving === pkg.id;
-                  const isSavedThis = saveMessage?.id === pkg.id;
-
                   return (
                     <div
                       key={pkg.id}
@@ -674,21 +589,7 @@ export default function AdminDashboardPage() {
                       <div className="space-y-3">
                         <div>
                           <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
-                            Likes Amount
-                          </label>
-                          <input
-                            type="number"
-                            value={pkg.amount}
-                            onChange={(e) =>
-                              handlePriceChange(pkg.id, "amount", parseInt(e.target.value) || 0)
-                            }
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm font-bold text-white focus:outline-hidden focus:border-indigo-500"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
-                            Package Label
+                            Package
                           </label>
                           <input
                             type="text"
@@ -700,56 +601,126 @@ export default function AdminDashboardPage() {
 
                         <div>
                           <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
-                            Price ($ USD)
+                            Price (₹ INR)
                           </label>
                           <div className="relative">
-                            <span className="absolute left-3 top-2 text-slate-500 font-bold">$</span>
+                            <span className="absolute left-3 top-2 text-slate-500 font-bold">₹</span>
                             <input
-                              type="number"
-                              step="0.01"
+                              type="text"
+                              inputMode="decimal"
                               value={pkg.price}
                               onChange={(e) =>
-                                handlePriceChange(pkg.id, "price", parseFloat(e.target.value) || 0)
+                                handlePriceChange(pkg.id, "price", e.target.value)
                               }
                               className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-7 pr-3 py-2 text-base font-extrabold text-emerald-400 focus:outline-hidden focus:border-emerald-500"
                             />
                           </div>
                         </div>
                       </div>
-
-                      <button
-                        onClick={() => handleSavePackage(pkg.id)}
-                        disabled={isSavingThis}
-                        className={`w-full py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                          isSavedThis
-                            ? "bg-emerald-600 text-white"
-                            : "bg-gradient-to-r from-indigo-600 to-pink-600 hover:opacity-90 text-white"
-                        }`}
-                      >
-                        {isSavingThis ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Saving...</span>
-                          </>
-                        ) : isSavedThis ? (
-                          <>
-                            <Check className="w-3.5 h-3.5" />
-                            <span>{saveMessage?.text}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Save className="w-3.5 h-3.5" />
-                            <span>Save Item Price</span>
-                          </>
-                        )}
-                      </button>
                     </div>
                   );
                 })}
               </div>
             </div>
+
+            {/* Individual Reel Views Packages Section */}
+            <div className="space-y-4 pt-4 border-t border-slate-800">
+              <div className="flex items-center gap-2 pb-1">
+                <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400">
+                  <Play className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white">Instagram Reel Views Packages</h2>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {viewsPackages.map((pkg) => {
+                  return (
+                    <div
+                      key={pkg.id}
+                      className="bg-slate-900/70 border border-slate-800 hover:border-slate-700 p-5 rounded-3xl space-y-4 relative transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold font-mono text-slate-400">{pkg.id}</span>
+                        {pkg.popular && (
+                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                            {pkg.tag || "Popular"}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+                            Package
+                          </label>
+                          <input
+                            type="text"
+                            value={pkg.label}
+                            onChange={(e) => handlePriceChange(pkg.id, "label", e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm font-bold text-white focus:outline-hidden focus:border-purple-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+                            Price (₹ INR)
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-2 text-slate-500 font-bold">₹</span>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={pkg.price}
+                              onChange={(e) =>
+                                handlePriceChange(pkg.id, "price", e.target.value)
+                              }
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-7 pr-3 py-2 text-base font-extrabold text-emerald-400 focus:outline-hidden focus:border-emerald-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Bottom Single Unified Save All Packages Button */}
+            <div className="pt-6 pb-4 flex items-center justify-center border-t border-slate-800">
+              <button
+                type="button"
+                onClick={handleSaveAllPackages}
+                disabled={isSavingAllPackages}
+                className={`w-full sm:w-auto min-w-[320px] py-4 px-8 rounded-2xl font-black text-base flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-xl active:scale-98 ${
+                  saveAllSuccessMsg
+                    ? "bg-emerald-600 text-white shadow-emerald-500/25"
+                    : "bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 hover:opacity-95 text-white shadow-pink-500/25 hover:shadow-pink-500/40"
+                }`}
+              >
+                {isSavingAllPackages ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    <span>Saving All Packages to Database...</span>
+                  </>
+                ) : saveAllSuccessMsg ? (
+                  <>
+                    <Check className="w-5 h-5 text-white animate-bounce" />
+                    <span>All Package Prices Saved!</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-5 h-5" />
+                    <span>Save All Packages</span>
+                  </>
+                )}
+              </button>
+            </div>
+
           </div>
         )}
+
 
         {/* Tab 2: Login Users Database */}
         {activeTab === "users" && (
@@ -781,16 +752,17 @@ export default function AdminDashboardPage() {
                     <tr>
                       <th className="p-4">User</th>
                       <th className="p-4">Email</th>
-                      <th className="p-4">Provider</th>
+                      <th className="p-4">Wallet Balance</th>
                       <th className="p-4">Total Boosts</th>
+                      <th className="p-4">Provider</th>
                       <th className="p-4">Last Login</th>
-                      <th className="p-4">Registered On</th>
+                      <th className="p-4">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800">
                     {filteredUsers.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-8 text-center text-slate-500">
+                        <td colSpan={7} className="p-8 text-center text-slate-500">
                           No user records found in database.
                         </td>
                       </tr>
@@ -813,25 +785,41 @@ export default function AdminDashboardPage() {
                           </td>
                           <td className="p-4 text-slate-300 font-mono">{u.email}</td>
                           <td className="p-4">
-                            <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 font-semibold text-[11px] uppercase">
-                              {u.provider}
-                            </span>
+                            <div className="flex items-center gap-1.5 font-black text-emerald-400 font-mono text-sm bg-emerald-950/40 border border-emerald-800/50 px-2.5 py-1 rounded-xl w-fit">
+                              <Wallet className="w-3.5 h-3.5" />
+                              <span>₹{Number(u.wallet_balance ?? 50.0).toFixed(2)}</span>
+                            </div>
                           </td>
                           <td className="p-4">
                             <span className="font-extrabold text-pink-400">
                               {u.total_orders_count || 0} orders
                             </span>
                           </td>
+                          <td className="p-4">
+                            <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 font-semibold text-[11px] uppercase">
+                              {u.provider}
+                            </span>
+                          </td>
                           <td className="p-4 text-slate-400">
                             {new Date(u.last_login).toLocaleString()}
                           </td>
-                          <td className="p-4 text-slate-500">
-                            {new Date(u.created_at).toLocaleDateString()}
+                          <td className="p-4">
+                            <button
+                              onClick={() => {
+                                setWalletModalUser(u);
+                                setAddAmount("500");
+                              }}
+                              className="flex items-center gap-1.5 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer"
+                            >
+                              <PlusCircle className="w-3.5 h-3.5" />
+                              <span>Credit Wallet</span>
+                            </button>
                           </td>
                         </tr>
                       ))
                     )}
                   </tbody>
+
                 </table>
               </div>
             </div>
@@ -891,11 +879,10 @@ export default function AdminDashboardPage() {
                           <td className="p-4 text-slate-300 font-mono">{o.user_email}</td>
                           <td className="p-4">
                             <span
-                              className={`px-2.5 py-1 rounded-full font-bold text-[10px] uppercase ${
-                                o.service_type === "followers"
-                                  ? "bg-pink-500/20 text-pink-400 border border-pink-500/30"
-                                  : "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                              }`}
+                              className={`px-2.5 py-1 rounded-full font-bold text-[10px] uppercase ${o.service_type === "followers"
+                                ? "bg-pink-500/20 text-pink-400 border border-pink-500/30"
+                                : "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                                }`}
                             >
                               {o.service_type}
                             </span>
@@ -903,7 +890,7 @@ export default function AdminDashboardPage() {
                           <td className="p-4 font-bold text-white">@{o.target_username}</td>
                           <td className="p-4 font-extrabold text-white">+{o.package_amount.toLocaleString()}</td>
                           <td className="p-4 font-extrabold text-emerald-400">
-                            ${Number(o.price || 0).toFixed(2)}
+                            ₹{Number(o.price || 0).toFixed(2)}
                           </td>
                           <td className="p-4 text-slate-400">
                             <span>{o.initial_count}</span>
@@ -912,13 +899,12 @@ export default function AdminDashboardPage() {
                           </td>
                           <td className="p-4">
                             <span
-                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                                o.status === "successful"
-                                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                                  : o.status === "ordered"
+                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${o.status === "successful"
+                                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                : o.status === "ordered"
                                   ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
                                   : "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                              }`}
+                                }`}
                             >
                               {o.status}
                             </span>
@@ -935,7 +921,107 @@ export default function AdminDashboardPage() {
             </div>
           </div>
         )}
+
+        {/* Admin Credit Wallet Modal */}
+        {walletModalUser && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl animate-in zoom-in-95">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-white text-base">Credit User Wallet</h3>
+                    <p className="text-xs text-slate-400">{walletModalUser.email}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setWalletModalUser(null)}
+                  className="text-slate-500 hover:text-white font-bold text-lg"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {fundSuccessMsg ? (
+                <div className="bg-emerald-950/60 border border-emerald-800 p-4 rounded-2xl text-emerald-400 text-xs font-extrabold text-center flex items-center justify-center gap-2">
+                  <Check className="w-4 h-4" />
+                  <span>{fundSuccessMsg}</span>
+                </div>
+              ) : (
+                <form onSubmit={handleCreditWallet} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">
+                      Current Wallet Balance
+                    </label>
+                    <div className="text-xl font-black text-emerald-400 font-mono">
+                      ₹{Number(walletModalUser.wallet_balance ?? 50.0).toFixed(2)}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">
+                      Amount to Add (₹ INR)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-3 text-slate-400 font-bold">₹</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={addAmount}
+                        onChange={(e) => setAddAmount(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-2.5 text-base font-extrabold text-white focus:outline-hidden focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    {["100", "500", "1000", "5000"].map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setAddAmount(amt)}
+                        className="flex-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl py-1.5 text-xs font-bold text-slate-300 cursor-pointer"
+                      >
+                        +₹{amt}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="pt-2 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setWalletModalUser(null)}
+                      className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isAddingFunds}
+                      className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:opacity-90 text-white font-extrabold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/20 cursor-pointer"
+                    >
+                      {isAddingFunds ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Crediting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <PlusCircle className="w-3.5 h-3.5" />
+                          <span>Confirm Top-up</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+

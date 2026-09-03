@@ -1,18 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || "http://127.0.0.1:8000";
 
 const DEFAULT_PACKAGES = [
-  { id: "pkg_followers_1k", service_type: "followers", amount: 1000, label: "1K Followers", price: 8.00, currency: "USD", popular: false, tag: "Starter Growth", is_active: true },
-  { id: "pkg_followers_10k", service_type: "followers", amount: 10000, label: "10K Followers", price: 76.00, currency: "USD", popular: true, tag: "Most Popular", is_active: true },
-  { id: "pkg_followers_100k", service_type: "followers", amount: 100000, label: "100K Followers", price: 720.00, currency: "USD", popular: false, tag: "Pro Creator", is_active: true },
-  { id: "pkg_followers_1m", service_type: "followers", amount: 1000000, label: "1M Followers", price: 6400.00, currency: "USD", popular: false, tag: "Celebrity Fame", is_active: true },
+  { id: "pkg_followers_1k", service_type: "followers", amount: 1000, label: "1K Followers", price: 80.00, currency: "INR", popular: false, tag: "Starter Growth", is_active: true },
+  { id: "pkg_followers_10k", service_type: "followers", amount: 10000, label: "10K Followers", price: 760.00, currency: "INR", popular: true, tag: "Most Popular", is_active: true },
+  { id: "pkg_followers_100k", service_type: "followers", amount: 100000, label: "100K Followers", price: 7200.00, currency: "INR", popular: false, tag: "Pro Creator", is_active: true },
+  { id: "pkg_followers_1m", service_type: "followers", amount: 1000000, label: "1M Followers", price: 64000.00, currency: "INR", popular: false, tag: "Celebrity Fame", is_active: true },
 
-  { id: "pkg_likes_1k", service_type: "likes", amount: 1000, label: "1K Likes", price: 4.00, currency: "USD", popular: false, tag: "Starter Boost", is_active: true },
-  { id: "pkg_likes_10k", service_type: "likes", amount: 10000, label: "10K Likes", price: 38.00, currency: "USD", popular: true, tag: "Most Popular", is_active: true },
-  { id: "pkg_likes_100k", service_type: "likes", amount: 100000, label: "100K Likes", price: 360.00, currency: "USD", popular: false, tag: "Viral Hit", is_active: true },
-  { id: "pkg_likes_1m", service_type: "likes", amount: 1000000, label: "1M Likes", price: 3200.00, currency: "USD", popular: false, tag: "Explore Sensation", is_active: true },
+  { id: "pkg_likes_1k", service_type: "likes", amount: 1000, label: "1K Likes", price: 40.00, currency: "INR", popular: false, tag: "Starter Boost", is_active: true },
+  { id: "pkg_likes_10k", service_type: "likes", amount: 10000, label: "10K Likes", price: 380.00, currency: "INR", popular: true, tag: "Most Popular", is_active: true },
+  { id: "pkg_likes_100k", service_type: "likes", amount: 100000, label: "100K Likes", price: 3600.00, currency: "INR", popular: false, tag: "Viral Hit", is_active: true },
+  { id: "pkg_likes_1m", service_type: "likes", amount: 1000000, label: "1M Likes", price: 32000.00, currency: "INR", popular: false, tag: "Explore Sensation", is_active: true },
+
+  { id: "pkg_views_1k", service_type: "views", amount: 1000, label: "1K Reel Views", price: 20.00, currency: "INR", popular: false, tag: "Starter Views", is_active: true },
+  { id: "pkg_views_10k", service_type: "views", amount: 10000, label: "10K Reel Views", price: 190.00, currency: "INR", popular: true, tag: "Most Popular", is_active: true },
+  { id: "pkg_views_100k", service_type: "views", amount: 100000, label: "100K Reel Views", price: 1800.00, currency: "INR", popular: false, tag: "Viral Reel", is_active: true },
+  { id: "pkg_views_1m", service_type: "views", amount: 1000000, label: "1M Reel Views", price: 16000.00, currency: "INR", popular: false, tag: "Explore Sensation", is_active: true },
 ];
+
 
 export async function GET(request: NextRequest) {
   try {

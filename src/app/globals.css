@@ -1,6 +1,6 @@
-@import "tailwindcss/base";
-@import "tailwindcss/components";
-@import "tailwindcss/utilities";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
   --foreground-rgb: 15, 23, 42;
@@ -23,6 +23,17 @@ body {
   scrollbar-width: none;
 }
 
+/* Remove spin buttons from number inputs for clean typing */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+input[type=number] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 /* Instagram Gradient Text & Ring */
 .ig-gradient-text {
   background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
@@ -34,12 +45,12 @@ body {
   background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
 }
 
-/* Facebook Action Hover */
-.fb-hover-bg {
+/* YouTube Action Hover */
+.yt-hover-bg {
   transition: background-color 0.2s ease-in-out;
 }
-.fb-hover-bg:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+.yt-hover-bg:hover {
+  background-color: rgba(255, 0, 0, 0.05);
 }
 
 /* Custom Skeleton Pulse */

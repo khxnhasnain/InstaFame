@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/common/Navbar";
 import Loader from "@/components/common/Loader";
-import { Instagram, Facebook, ArrowRight, Sparkles, Layers, ShieldCheck, Search } from "lucide-react";
+import { Instagram, ArrowRight, Sparkles, Layers, ShieldCheck, Search, Play } from "lucide-react";
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
@@ -19,7 +19,15 @@ export default function DashboardPage() {
     }
   }, [status, router]);
 
-  if (status === "unauthenticated") {
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <Loader text="Verifying your Google session..." />
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated" || !session) {
     return null;
   }
 
@@ -30,7 +38,7 @@ export default function DashboardPage() {
       <main className="flex-grow max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">
         {/* Hero Welcome Banner */}
         <section className="relative bg-white rounded-3xl p-8 md:p-12 overflow-hidden border border-slate-200 shadow-xl">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-instagram-pink/10 to-facebook-blue/10 blur-3xl pointer-events-none" />
+          <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-instagram-pink/10 to-red-600/10 blur-3xl pointer-events-none" />
 
           <div className="relative z-10 space-y-4 max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-xs font-bold text-instagram-pink border border-slate-200">
@@ -40,13 +48,13 @@ export default function DashboardPage() {
 
             <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 leading-tight">
               Explore Profiles with{" "}
-              <span className="bg-gradient-to-r from-instagram-orange via-instagram-pink to-facebook-blue bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-instagram-orange via-instagram-pink to-red-600 bg-clip-text text-transparent">
                 InstaFame
               </span>
             </h1>
 
             <p className="text-slate-600 text-sm sm:text-base leading-relaxed">
-              Hello, <strong className="text-slate-900">{session?.user?.name || "Explorer"}</strong>! Welcome to InstaFame, We're so excited to help you grow your Instagram and Facebook presence.
+              Hello, <strong className="text-slate-900">{session?.user?.name || "Explorer"}</strong>! Welcome to InstaFame, We're so excited to help you grow your Instagram and YouTube presence.
             </p>
           </div>
         </section>
@@ -80,8 +88,7 @@ export default function DashboardPage() {
                     Instagram Profile Viewer
                   </h3>
                   <p className="text-slate-600 text-sm mt-2 leading-relaxed">
-                    Tired of stuck at 500 followers? InstaFame is the secret weapon that thousands use to gain 1000+ followers daily and increase their likes and reach
-                    We connect securely with your Instagram account, We never store your password.
+                    Tired of being stuck at 500 followers? InstaFame is the secret weapon that thousands use to gain 1000+ followers daily, explore reels, and increase organic reach.
                   </p>
                 </div>
 
@@ -94,34 +101,39 @@ export default function DashboardPage() {
               </div>
             </Link>
 
-            {/* Facebook Card */}
+            {/* YouTube Card */}
             <Link
-              href="/facebook"
+              href="/youtube"
               className="group relative bg-white rounded-3xl p-8 border border-slate-200 shadow-md hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden"
             >
-              <div className="absolute inset-0 bg-gradient-to-br from-facebook-blue/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="absolute inset-0 bg-gradient-to-br from-red-600/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
 
               <div className="relative z-10 space-y-6">
                 <div className="flex items-center justify-between">
-                  <div className="w-14 h-14 rounded-2xl bg-facebook-blue p-0.5 shadow-md group-hover:scale-110 transition-transform">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-red-600 via-rose-600 to-red-500 p-0.5 shadow-md shadow-red-500/20 group-hover:scale-110 transition-transform">
                     <div className="w-full h-full bg-white rounded-[14px] flex items-center justify-center">
-                      <Facebook className="w-7 h-7 text-facebook-blue" />
+                      <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"
+                          fill="#FF0000"
+                        />
+                        <polygon points="9.545,15.568 15.818,12 9.545,8.432" fill="#FFFFFF" />
+                      </svg>
                     </div>
                   </div>
                 </div>
 
                 <div>
-                  <h3 className="text-2xl font-extrabold text-slate-900 group-hover:text-facebook-blue transition-colors">
-                    Facebook Profile Viewer
+                  <h3 className="text-2xl font-extrabold text-slate-900 group-hover:text-red-600 transition-colors">
+                    YouTube Profile & Video Viewer
                   </h3>
                   <p className="text-slate-600 text-sm mt-2 leading-relaxed">
-                    Tired of stuck at 500 followers? InstaFame is the secret weapon that thousands use to gain 1000+ followers daily and increase their likes and reach.
-                    We connect securely with your Facebook account, We never store your password
+                    Explore YouTube channels, play videos directly inside the in-app player without redirecting, and boost subscribers, views, and likes instantly.
                   </p>
                 </div>
 
                 <div className="pt-2 flex items-center justify-between text-xs font-semibold text-slate-500">
-                  <div className="flex items-center gap-1 text-facebook-blue font-bold group-hover:translate-x-1 transition-transform">
+                  <div className="flex items-center gap-1 text-red-600 font-bold group-hover:translate-x-1 transition-transform">
                     <span>Open Viewer</span>
                     <ArrowRight className="w-4 h-4" />
                   </div>

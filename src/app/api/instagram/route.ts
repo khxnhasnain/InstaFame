@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchLiveRapidApiInstagramProfile } from "@/lib/instagramData";
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,42 +23,52 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const limitParam = searchParams.get("limit") || "12";
+
     const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || "http://127.0.0.1:8000";
 
-    // 1. Try Python FastAPI Backend Server
+    // Call Python FastAPI backend (instagrapi)
     try {
-      let pyUrl = `${PYTHON_BACKEND_URL}/api/instagram?username=${encodeURIComponent(cleanUsername)}&type=${encodeURIComponent(typeParam)}`;
-      if (paginationToken) {
-        pyUrl += `&pagination_token=${encodeURIComponent(paginationToken)}`;
+      let pyUrl = `${PYTHON_BACKEND_URL}/instagram/profile/${encodeURIComponent(cleanUsername)}`;
+      if (typeParam === "posts") {
+        pyUrl = `${PYTHON_BACKEND_URL}/instagram/profile/${encodeURIComponent(cleanUsername)}/posts?limit=${encodeURIComponent(limitParam)}${paginationToken ? `&pagination_token=${encodeURIComponent(paginationToken)}` : ""}`;
+      } else if (typeParam === "reels") {
+        pyUrl = `${PYTHON_BACKEND_URL}/instagram/profile/${encodeURIComponent(cleanUsername)}/reels?limit=${encodeURIComponent(limitParam)}${paginationToken ? `&pagination_token=${encodeURIComponent(paginationToken)}` : ""}`;
       }
-      const pyRes = await fetch(pyUrl, { cache: "no-store", signal: AbortSignal.timeout(5000) });
+
+      const pyRes = await fetch(pyUrl, { cache: "no-store", signal: AbortSignal.timeout(18000) });
+
       if (pyRes.ok) {
         const pyData = await pyRes.json();
-        if (pyData && pyData.data) {
-          return NextResponse.json(pyData, {
-            status: 200,
-            headers: { "Cache-Control": "public, max-age=60, s-maxage=300" },
-          });
+        if (pyData) {
+          const responseData = pyData.data || pyData;
+          return NextResponse.json(
+            { success: true, data: responseData, source: "Python instagrapi Backend" },
+            {
+              status: 200,
+              headers: { "Cache-Control": "public, max-age=60, s-maxage=300" },
+            }
+          );
         }
       }
-    } catch (pyErr) {
-      // Fallback to direct RapidAPI
-    }
 
-    // 2. Fetch directly from RapidAPI Live Engine
-    const result = await fetchLiveRapidApiInstagramProfile(cleanUsername, paginationToken, typeParam);
-
-    if (result.profile) {
+      const errData = await pyRes.json().catch(() => ({}));
       return NextResponse.json(
-        { success: true, data: result.profile, source: "RapidAPI Live Instagram Engine" },
-        { status: 200 }
+        { error: errData.detail || errData.error || `User '@${cleanUsername}' not found or instagrapi fetch failed.` },
+        { status: pyRes.status || 404 }
+      );
+    } catch (pyErr: any) {
+      console.warn("Python backend connection error:", pyErr);
+      const isTimeout = pyErr?.name === "TimeoutError" || pyErr?.message?.includes("aborted");
+      return NextResponse.json(
+        { 
+          error: isTimeout 
+            ? "Instagram request timed out. Instagram may be rate-limiting automated requests from your current IP. Please use IG_SESSIONID in .env.local for instant bypass." 
+            : `Python instagrapi backend error: ${pyErr?.message || "Connection failed"}. Please ensure 'python backend/main.py' is running on http://127.0.0.1:8000.` 
+        },
+        { status: 503 }
       );
     }
-
-    return NextResponse.json(
-      { error: result.error || `User '@${cleanUsername}' not found on Instagram.` },
-      { status: result.status || 404 }
-    );
   } catch (error: any) {
     return NextResponse.json(
       { error: error?.message || "An unexpected error occurred while fetching Instagram profile data." },

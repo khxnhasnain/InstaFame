@@ -91,22 +91,27 @@ export default function InstagramPage() {
 
   // Fetch next page of reels (Pagination)
   const handleLoadMoreReels = async () => {
-    if (!profile || !profile.reelsPaginationToken || loadingMore) return;
+    if (!profile || loadingMore) return;
     setLoadingMore(true);
     try {
+      const currentList = profile.reels && profile.reels.length > 0 ? profile.reels : (profile.posts || []).filter((p) => p.isVideo);
+      const currentReelsCount = currentList.length;
+      const targetLimit = Math.max(currentReelsCount + 12, 24);
       const res = await fetch(
-        `/api/instagram?username=${encodeURIComponent(profile.username)}&type=reels&pagination_token=${encodeURIComponent(profile.reelsPaginationToken)}`
+        `/api/instagram?username=${encodeURIComponent(profile.username)}&type=reels&limit=${targetLimit}`
       );
       const json = await res.json();
-      if (res.ok && json.data && json.data.reels) {
+      if (res.ok && json.data && (json.data.reels || json.data.posts)) {
+        const incomingReels = json.data.reels || json.data.posts || [];
         setProfile((prev) => {
           if (!prev) return json.data;
-          const existingIds = new Set((prev.reels || []).map((p) => p.id));
-          const newReels = (json.data.reels || []).filter((p: InstagramPost) => !existingIds.has(p.id));
+          const baseReels = prev.reels && prev.reels.length > 0 ? prev.reels : prev.posts.filter((p) => p.isVideo);
+          const existingIds = new Set(baseReels.map((p) => p.id));
+          const newReels = incomingReels.filter((p: InstagramPost) => !existingIds.has(p.id));
           return {
             ...prev,
-            reelsPaginationToken: json.data.reelsPaginationToken,
-            reels: [...(prev.reels || []), ...newReels],
+            reelsPaginationToken: String(targetLimit),
+            reels: [...baseReels, ...newReels],
           };
         });
       }
@@ -116,6 +121,14 @@ export default function InstagramPage() {
       setLoadingMore(false);
     }
   };
+
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="w-8 h-8 border-2 border-instagram-pink border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (status === "unauthenticated") {
     return null;

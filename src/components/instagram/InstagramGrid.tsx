@@ -45,8 +45,8 @@ export default function InstagramGrid({
   const reelsList = reels.length > 0 ? reels : videoPosts;
   const displayList = activeTab === "reels" ? reelsList : posts;
 
-  const showMorePosts = hasMorePosts ?? hasMore;
-  const showMoreReels = hasMoreReels ?? false;
+  const showMorePosts = (hasMorePosts ?? hasMore) || posts.length >= 6;
+  const showMoreReels = Boolean(hasMoreReels) || reelsList.length >= 6;
 
   const handleTriggerLoadMore = () => {
     if (activeTab === "posts") {
@@ -121,10 +121,17 @@ export default function InstagramGrid({
                     className="aspect-square relative group cursor-pointer bg-slate-100 dark:bg-slate-900 overflow-hidden"
                   >
                     <img
-                      src={post.imageUrl}
-                      alt={post.caption}
+                      src={post.imageUrl || (post as any).thumbnail_url || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80"}
+                      alt={post.caption || "Instagram media"}
                       loading="lazy"
                       referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        // Fallback gracefully on expired CDN URLs
+                        const target = e.currentTarget;
+                        if (!target.src.includes("unsplash.com")) {
+                          target.src = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80";
+                        }
+                      }}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
 

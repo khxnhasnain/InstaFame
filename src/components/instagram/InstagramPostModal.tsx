@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, Heart, MessageCircle, Send, Bookmark, Smile, MoreHorizontal, ChevronLeft, ChevronRight, Layers, Download, Check, Zap } from "lucide-react";
+import { X, Heart, MessageCircle, Send, Bookmark, Smile, MoreHorizontal, ChevronLeft, ChevronRight, Layers, Download, Check, Zap, Play } from "lucide-react";
 import { InstagramPost } from "@/lib/instagramData";
 import InstagramBoostModal from "./InstagramBoostModal";
 
@@ -22,6 +22,7 @@ export default function InstagramPostModal({ post, username, avatarUrl, onClose 
   const [downloading, setDownloading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
   const [showBoostModal, setShowBoostModal] = useState(false);
+  const [boostType, setBoostType] = useState<"likes" | "views">("likes");
 
   const imagesList = post.carouselMedia && post.carouselMedia.length > 0 ? post.carouselMedia : [post.imageUrl];
 
@@ -142,10 +143,27 @@ export default function InstagramPostModal({ post, username, avatarUrl, onClose 
             />
           )}
 
-          {/* Top-Right Overlays: Increase Likes UI Button + Download Button */}
-          <div className="absolute top-4 right-4 flex items-center gap-2 z-30">
+          {/* Top-Right Overlays: Increase Likes & Reel Views + Download Button */}
+          <div className="absolute top-4 right-4 flex items-center flex-wrap gap-2 z-30">
+            {post.isVideo && (
+              <button
+                onClick={() => {
+                  setBoostType("views");
+                  setShowBoostModal(true);
+                }}
+                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-95 text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
+                title="Increase Reel Views"
+              >
+                <Play className="w-3.5 h-3.5 fill-white" />
+                <span>Increase Views</span>
+              </button>
+            )}
+
             <button
-              onClick={() => setShowBoostModal(true)}
+              onClick={() => {
+                setBoostType("likes");
+                setShowBoostModal(true);
+              }}
               className="bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 hover:opacity-95 text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
               title="Increase Likes"
             >
@@ -180,75 +198,78 @@ export default function InstagramPostModal({ post, username, avatarUrl, onClose 
             <>
               <button
                 onClick={handlePrevImage}
-                className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/80 text-white p-2 rounded-full transition-all shadow-md backdrop-blur-sm cursor-pointer"
-                title="Previous Photo"
+                className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/80 text-white p-2 rounded-full backdrop-blur-sm transition-all opacity-0 group-hover:opacity-100 cursor-pointer"
               >
-                <ChevronLeft className="w-6 h-6" />
+                <ChevronLeft className="w-5 h-5" />
               </button>
-
               <button
                 onClick={handleNextImage}
-                className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/80 text-white p-2 rounded-full transition-all shadow-md backdrop-blur-sm cursor-pointer"
-                title="Next Photo"
+                className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/80 text-white p-2 rounded-full backdrop-blur-sm transition-all opacity-0 group-hover:opacity-100 cursor-pointer"
               >
-                <ChevronRight className="w-6 h-6" />
+                <ChevronRight className="w-5 h-5" />
               </button>
 
-              {/* Photo Counter Badge */}
-              <div className="absolute top-4 left-4 bg-black/60 text-white text-xs font-bold px-2.5 py-1 rounded-full backdrop-blur-sm flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5" />
-                <span>{currentImgIndex + 1} / {imagesList.length}</span>
-              </div>
-
-              {/* Pagination Dots */}
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/40 px-3 py-1.5 rounded-full backdrop-blur-sm">
+              {/* Dots Indicators */}
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/40 px-2 py-1 rounded-full backdrop-blur-xs">
                 {imagesList.map((_, idx) => (
-                  <button
+                  <span
                     key={idx}
-                    onClick={() => setCurrentImgIndex(idx)}
-                    className={`w-2 h-2 rounded-full transition-all ${
-                      idx === currentImgIndex ? "bg-white w-4" : "bg-white/50"
+                    className={`w-1.5 h-1.5 rounded-full transition-all ${
+                      idx === currentImgIndex ? "bg-white scale-125" : "bg-white/50"
                     }`}
                   />
                 ))}
               </div>
             </>
           )}
+
+          {/* Carousel Badge Indicator */}
+          {!post.isVideo && imagesList.length > 1 && (
+            <div className="absolute top-4 left-4 bg-black/60 text-white text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 backdrop-blur-sm">
+              <Layers className="w-3.5 h-3.5" />
+              <span>
+                {currentImgIndex + 1}/{imagesList.length}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Right: Comments & Post Meta Sidebar */}
-        <div className="w-full md:w-[400px] flex flex-col justify-between border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          {/* Top Header */}
+        {/* Right: Comments, Actions & Engagement Sidebar */}
+        <div className="w-full md:w-[420px] flex flex-col h-[500px] md:h-auto border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+          {/* Header */}
           <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <img
                 src={avatarUrl}
                 alt={username}
-                referrerPolicy="no-referrer"
                 className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700"
               />
-              <span className="font-semibold text-sm text-slate-900 dark:text-white hover:underline cursor-pointer">
-                {username}
-              </span>
+              <div>
+                <span className="font-bold text-sm text-slate-900 dark:text-white hover:underline cursor-pointer">
+                  {username}
+                </span>
+                {post.location && (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {post.location}
+                  </p>
+                )}
+              </div>
             </div>
-            <button className="text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer">
-              <MoreHorizontal className="w-5 h-5" />
-            </button>
+            <MoreHorizontal className="w-5 h-5 text-slate-500 cursor-pointer hover:text-slate-700 dark:hover:text-slate-300" />
           </div>
 
-          {/* Middle: Caption & Comments Scroll Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 max-h-[350px] md:max-h-none">
+          {/* Caption & Comments Feed */}
+          <div className="flex-1 p-4 overflow-y-auto space-y-4 text-xs">
             {/* Caption */}
             {post.caption && (
-              <div className="flex gap-3 text-sm">
+              <div className="flex items-start gap-3">
                 <img
                   src={avatarUrl}
                   alt={username}
-                  referrerPolicy="no-referrer"
-                  className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                  className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200 dark:border-slate-700"
                 />
                 <div className="space-y-1">
-                  <p className="text-slate-800 dark:text-slate-200 leading-relaxed text-xs">
+                  <p className="text-slate-800 dark:text-slate-200 leading-relaxed">
                     <span className="font-semibold text-slate-900 dark:text-white mr-2">
                       {username}
                     </span>
@@ -261,11 +282,11 @@ export default function InstagramPostModal({ post, username, avatarUrl, onClose 
 
             {/* Comments List */}
             {comments.map((comment) => (
-              <div key={comment.id} className="flex gap-3 text-xs items-start">
+              <div key={comment.id} className="flex items-start gap-3">
                 <img
                   src={comment.avatar}
                   alt={comment.user}
-                  className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+                  className="w-7 h-7 rounded-full object-cover shrink-0"
                 />
                 <div className="flex-1 space-y-0.5">
                   <p className="text-slate-800 dark:text-slate-200">
@@ -317,18 +338,42 @@ export default function InstagramPostModal({ post, username, avatarUrl, onClose 
               </button>
             </div>
 
-            {/* Like Counter + Increase Likes UI Button */}
-            <div className="flex items-center justify-between pt-0.5">
-              <p className="text-xs font-semibold text-slate-900 dark:text-white">
-                {likesCount.toLocaleString()} likes
-              </p>
-              <button
-                onClick={() => setShowBoostModal(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold text-white bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 shadow-sm hover:opacity-95 active:scale-95 transition-all cursor-pointer"
-              >
-                <Zap className="w-3 h-3 fill-amber-300 text-amber-300" />
-                <span>Increase Likes</span>
-              </button>
+            {/* Like & Views Counter + Boost UI Buttons */}
+            <div className="flex items-center justify-between pt-0.5 flex-wrap gap-2">
+              <div>
+                <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                  {likesCount.toLocaleString()} likes
+                </p>
+                {post.isVideo && (
+                  <p className="text-[11px] font-medium text-purple-500 dark:text-purple-400">
+                    {(post.views || post.likes * 5 || 5000).toLocaleString()} views
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {post.isVideo && (
+                  <button
+                    onClick={() => {
+                      setBoostType("views");
+                      setShowBoostModal(true);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold text-white bg-gradient-to-r from-purple-600 to-pink-600 shadow-xs hover:opacity-95 active:scale-95 transition-all cursor-pointer"
+                  >
+                    <Play className="w-2.5 h-2.5 fill-white" />
+                    <span>Boost Views</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setBoostType("likes");
+                    setShowBoostModal(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold text-white bg-gradient-to-r from-instagram-orange via-instagram-pink to-indigo-600 shadow-sm hover:opacity-95 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Zap className="w-3 h-3 fill-amber-300 text-amber-300" />
+                  <span>Increase Likes</span>
+                </button>
+              </div>
             </div>
 
             {/* Timestamp */}
@@ -358,13 +403,13 @@ export default function InstagramPostModal({ post, username, avatarUrl, onClose 
         </div>
       </div>
 
-      {/* Increase Likes Modal */}
+      {/* Increase Boost Modal */}
       {showBoostModal && (
         <InstagramBoostModal
-          type="likes"
+          type={boostType}
           targetUsername={username}
           avatarUrl={avatarUrl}
-          initialCount={post.likes}
+          initialCount={boostType === "views" ? (post.views || post.likes * 5 || 5000) : likesCount}
           targetPost={post}
           onClose={() => setShowBoostModal(false)}
         />

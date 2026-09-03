@@ -4,7 +4,7 @@ import React, { useState, useEffect, Suspense } from "react";
 import { signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Sparkles, ShieldCheck, Instagram, Facebook, AlertCircle, HelpCircle } from "lucide-react";
+import { Sparkles, ShieldCheck, Instagram, Youtube, AlertCircle, HelpCircle } from "lucide-react";
 
 function LoginForm() {
   const { status } = useSession();
@@ -41,7 +41,7 @@ function LoginForm() {
     <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-8 shadow-xl relative z-10 space-y-8 text-center">
       {/* Brand Icon Header */}
       <div className="space-y-3">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-instagram-orange via-instagram-pink to-facebook-blue p-0.5 shadow-md">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-instagram-orange via-instagram-pink to-red-600 p-0.5 shadow-md">
           <div className="w-full h-full bg-white rounded-[14px] flex items-center justify-center">
             <Sparkles className="w-8 h-8 text-instagram-pink animate-pulse" />
           </div>
@@ -55,22 +55,11 @@ function LoginForm() {
         </p>
       </div>
 
-      {/* Interactive Platform Badge Links */}
-      <div className="flex items-center justify-center gap-3 py-1">
-        <Link
-          href="/instagram"
-          className="flex items-center gap-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3.5 py-1.5 rounded-full border border-slate-200 transition-colors"
-        >
-          <Instagram className="w-4 h-4 text-instagram-pink flex-shrink-0" />
-          <span>Instagram UI</span>
-        </Link>
-        <Link
-          href="/facebook"
-          className="flex items-center gap-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3.5 py-1.5 rounded-full border border-slate-200 transition-colors"
-        >
-          <Facebook className="w-4 h-4 text-facebook-blue flex-shrink-0" />
-          <span>Facebook UI</span>
-        </Link>
+      {/* Access Gate Prompt */}
+      <div className="py-1">
+        <p className="text-xs text-slate-600">
+          Sign in with your Google account to access your dashboard, wallet, and profile growth tools.
+        </p>
       </div>
 
       {/* Error Banner if OAuth failed */}
@@ -160,7 +149,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 relative overflow-hidden font-sans">
       {/* Background Glow Blobs */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-instagram-pink/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-facebook-blue/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
 
       <Suspense fallback={<div className="w-8 h-8 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />}>
         <LoginForm />

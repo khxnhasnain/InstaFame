@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || "http://127.0.0.1:8000";
 
 export async function GET(request: NextRequest) {
@@ -17,8 +20,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: { rate_per_1000_followers: 8.0, rate_per_1000_likes: 4.0, currency: "USD" },
+      data: { rate_per_1000_followers: 80.0, rate_per_1000_likes: 40.0, rate_per_1000_views: 20.0, currency: "INR" },
     });
+
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || "Failed to fetch rates" }, { status: 500 });
   }
