@@ -40,7 +40,7 @@ def test_place_smm_order_validations():
     # Empty link should fail
     success, order_id, err = place_smm_order("8393", "", 100)
     assert success is False
-    assert "Target Instagram profile link is required" in err
+    assert "Target post or profile link is required" in err
 
     # 0 quantity should fail
     success, order_id, err = place_smm_order("8393", "https://instagram.com/user", 0)
@@ -147,3 +147,66 @@ def test_boost_followers_success_deducts_platform_price():
         # Wallet balance deducted by platform price
         after_balance = db.get_user_wallet(TEST_USER_EMAIL)
         assert round(after_balance, 2) == round(initial_balance - platform_price, 2)
+
+
+def test_boost_likes_success_uses_service_7672():
+    initial_balance = db.get_user_wallet(TEST_USER_EMAIL)
+    platform_price = 40.00  # Our platform price for 1K likes
+
+    mock_response = MagicMock()
+    mock_response.read.return_value = b'{"order": 7672001}'
+    mock_response.__enter__.return_value = mock_response
+
+    with patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
+        payload = {
+            "user_email": TEST_USER_EMAIL,
+            "service_type": "likes",
+            "target_username": "real_creator",
+            "target_post_url": "https://www.instagram.com/p/Cxyz12345/",
+            "package_amount": 1000,
+            "package_label": "1K Likes",
+            "price": platform_price,
+        }
+        response = client.post("/api/orders", json=payload)
+        assert response.status_code == 200
+        data = response.json()["data"]
+
+        assert data["smm_order_id"] == "7672001"
+        assert data["price"] == platform_price
+
+        # Check that request sent service 7672
+        req = mock_urlopen.call_args[0][0]
+        assert b"service=7672" in req.data
+        assert b"link=https%3A%2F%2Fwww.instagram.com%2Fp%2FCxyz12345%2F" in req.data
+
+
+def test_boost_reel_views_success_uses_service_7685():
+    initial_balance = db.get_user_wallet(TEST_USER_EMAIL)
+    platform_price = 20.00  # Our platform price for 1K reel views
+
+    mock_response = MagicMock()
+    mock_response.read.return_value = b'{"order": 7685001}'
+    mock_response.__enter__.return_value = mock_response
+
+    with patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
+        payload = {
+            "user_email": TEST_USER_EMAIL,
+            "service_type": "views",
+            "target_username": "real_creator",
+            "target_post_url": "https://www.instagram.com/reel/Cxyz99999/",
+            "package_amount": 1000,
+            "package_label": "1K Reel Views",
+            "price": platform_price,
+        }
+        response = client.post("/api/orders", json=payload)
+        assert response.status_code == 200
+        data = response.json()["data"]
+
+        assert data["smm_order_id"] == "7685001"
+        assert data["price"] == platform_price
+
+        # Check that request sent service 7685
+        req = mock_urlopen.call_args[0][0]
+        assert b"service=7685" in req.data
+        assert b"link=https%3A%2F%2Fwww.instagram.com%2Freel%2FCxyz99999%2F" in req.data
+

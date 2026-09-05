@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 SMM_API_URL = os.environ.get("SMM_API_URL", "https://smmvault.in/api/v2")
 SMM_API_KEY = os.environ.get("SMM_API_KEY", "9ffa626994b11648cedd29c2b6cf5af04bdf7554")
 DEFAULT_FOLLOWERS_SERVICE_ID = os.environ.get("SMM_FOLLOWERS_SERVICE_ID", "8393")
+DEFAULT_LIKES_SERVICE_ID = os.environ.get("SMM_LIKES_SERVICE_ID", "7672")
+DEFAULT_REEL_VIEWS_SERVICE_ID = os.environ.get("SMM_REEL_VIEWS_SERVICE_ID", "7685")
 
 
 def place_smm_order(
@@ -28,10 +30,10 @@ def place_smm_order(
         return False, None, "SMM Provider API key is not configured."
 
     if not link or not link.strip():
-        return False, None, "Target Instagram profile link is required."
+        return False, None, "Target post or profile link is required."
 
     if quantity <= 0:
-        return False, None, "Follower quantity must be greater than 0."
+        return False, None, "Order quantity must be greater than 0."
 
     # Build form-encoded payload for SMM panel
     payload = {

@@ -271,29 +271,49 @@ def record_order(order_data: Dict[str, Any] = Body(...)):
             detail=f"Insufficient wallet balance (₹{user_wallet:.2f}). Required: ₹{price:.2f}. Please recharge your wallet first."
         )
 
-    # 2. For Instagram followers boost, submit to SMMVault Service 8393
-    if service_type == "followers":
+    # 2. For Instagram boosts, submit to SMMVault
+    if service_type in ("followers", "likes", "views"):
         target_username = (order_data.get("target_username") or "").strip().lstrip("@")
-        if not target_username:
-            raise HTTPException(status_code=400, detail="Target Instagram username is required to boost followers.")
-        
-        # Build canonical Instagram profile link
-        profile_link = f"https://www.instagram.com/{target_username}/"
-        
-        # Call SMMVault API (Service 8393: Indian flw)
+        target_post_url = (order_data.get("target_post_url") or "").strip()
+
+        if service_type == "followers":
+            if not target_username:
+                raise HTTPException(status_code=400, detail="Target Instagram username is required to boost followers.")
+            smm_service_id = "8393"
+            link = f"https://www.instagram.com/{target_username}/"
+
+        elif service_type == "likes":
+            smm_service_id = "7672"
+            if target_post_url and target_post_url.startswith("http") and "instagram.com" in target_post_url:
+                link = target_post_url
+            elif target_username:
+                link = f"https://www.instagram.com/{target_username}/"
+            else:
+                raise HTTPException(status_code=400, detail="Target post or reel link is required to boost likes.")
+
+        elif service_type == "views":
+            smm_service_id = "7685"
+            if target_post_url and target_post_url.startswith("http") and "instagram.com" in target_post_url:
+                link = target_post_url
+            elif target_username:
+                link = f"https://www.instagram.com/{target_username}/"
+            else:
+                raise HTTPException(status_code=400, detail="Target reel link is required to boost reel views.")
+
+        # Call SMMVault API (Wholesale rates are never exposed to the user or frontend)
         smm_success, order_id_from_smm, smm_err = place_smm_order(
-            service_id="8393",
-            link=profile_link,
+            service_id=smm_service_id,
+            link=link,
             quantity=package_amount
         )
-        
+
         if not smm_success:
             # If SMM provider fails, abort WITHOUT charging user wallet
             raise HTTPException(
                 status_code=400,
                 detail=f"SMM Provider Error: {smm_err or 'Failed to place boost order with provider.'}"
             )
-        
+
         order_data["smm_order_id"] = str(order_id_from_smm)
         order_data["smm_status"] = "Pending"
 

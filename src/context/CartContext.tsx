@@ -11,6 +11,7 @@ export interface BoostOrder {
 
   avatarUrl: string;
   postThumbnail?: string;
+  postUrl?: string;
   postId?: string;
   packageAmount: number;
   packageLabel: string;
@@ -245,7 +246,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           user_email: newOrder.userEmail,
           service_type: newOrder.type,
           target_username: newOrder.username,
-          target_post_url: newOrder.postThumbnail || "",
+          target_post_url: newOrder.postUrl || newOrder.postThumbnail || "",
           package_amount: newOrder.packageAmount,
           package_label: newOrder.packageLabel,
           price: newOrder.price || 0,
