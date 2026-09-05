@@ -25,7 +25,7 @@ const checkIsAdmin = (email?: string | null, sessionUser?: any): boolean => {
   if (sessionUser?.isAdmin || sessionUser?.role === "admin") return true;
   if (!email) return false;
   const clean = email.toLowerCase().trim();
-  const envAdmins = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "khanhasnain2310@gmail.com,admin@instafame.com")
+  const envAdmins = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "khanhasnain2310@gmail.com,admin@viralora.com,admin@instafame.com")
     .split(",")
     .map((e) => e.trim().toLowerCase());
   return envAdmins.includes(clean) || clean.startsWith("admin@");
@@ -91,7 +91,7 @@ export default function Navbar() {
   ];
 
   const navLinks: NavItem[] = isAdmin
-    ? [...baseNavLinks, { name: "Pricing & DB", href: "/admin", icon: ShieldCheck, isAdminOnly: true }]
+    ? [...baseNavLinks, { name: "Admin", href: "/admin", icon: ShieldCheck, isAdminOnly: true }]
     : baseNavLinks;
 
   return (
@@ -105,9 +105,14 @@ export default function Navbar() {
                 <Sparkles className="w-5 h-5 text-instagram-pink" />
               </div>
             </div>
-            <span className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-instagram-pink via-purple-600 to-red-600 bg-clip-text text-transparent">
-              InstaFame
-            </span>
+            <div className="flex flex-col justify-center">
+              <span className="font-extrabold text-xl leading-none tracking-tight bg-gradient-to-r from-instagram-pink via-purple-600 to-red-600 bg-clip-text text-transparent">
+                Viralora
+              </span>
+              <span className="text-[9.5px] font-bold tracking-wider text-slate-500 uppercase leading-none mt-1">
+                Grow Your Presence
+              </span>
+            </div>
           </Link>
 
           {/* Desktop Navigation Links */}
@@ -119,7 +124,7 @@ export default function Navbar() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
                     isActive
                       ? "bg-slate-100 text-slate-900 shadow-2xs border border-slate-200"
                       : link.isAdminOnly
@@ -129,7 +134,7 @@ export default function Navbar() {
                 >
                   <Icon className={`w-4 h-4 ${isActive ? "text-instagram-pink" : link.isAdminOnly ? "text-indigo-600" : "text-slate-500"}`} />
                   <span>{link.name}</span>
-                  {link.isAdminOnly && (
+                  {link.isAdminOnly && link.name !== "Admin" && (
                     <span className="text-[9px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-md">
                       Admin
                     </span>
@@ -258,7 +263,7 @@ export default function Navbar() {
               >
                 <Icon className={`w-5 h-5 ${isActive ? "text-instagram-pink" : link.isAdminOnly ? "text-indigo-600" : "text-slate-500"}`} />
                 <span>{link.name}</span>
-                {link.isAdminOnly && (
+                {link.isAdminOnly && link.name !== "Admin" && (
                   <span className="ml-auto text-[10px] font-black uppercase bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">
                     Admin
                   </span>

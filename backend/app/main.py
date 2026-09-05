@@ -16,7 +16,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="InstaFame API", version="1.0.0")
+app = FastAPI(title="Viralora API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,7 +30,7 @@ app.include_router(instagram.router)
 
 @app.get("/")
 async def root():
-    return {"message": "InstaFame API running", "status": "active"}
+    return {"message": "Viralora API running", "status": "active"}
 
 if __name__ == "__main__":
     import uvicorn

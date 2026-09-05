@@ -6,7 +6,7 @@ import Providers from "@/components/Providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "InstaFame - Social Profile Viewer",
+  title: "Viralora - Grow Your Presence | Social Profile Viewer",
   description: "View exact UI replicas of Instagram and Facebook profiles in Next.js",
 };
 

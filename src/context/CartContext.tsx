@@ -32,6 +32,7 @@ interface CartContextType {
   addOrder: (
     orderData: Omit<BoostOrder, "id" | "currentCount" | "status" | "createdAt" | "userEmail"> & {
       smmOrderId?: string | number;
+      userEmail?: string;
     }
   ) => Promise<{ success: boolean; error?: string; order?: BoostOrder; remainingBalance?: number }>;
   removeOrder: (id: string) => void;
@@ -52,6 +53,12 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 function getStorageKey(userEmail?: string | null, userId?: string | null): string {
   const userTag = userEmail || userId || "guest";
   const sanitized = userTag.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  return `viralora_boost_orders_user_${sanitized}`;
+}
+
+function getLegacyStorageKey(userEmail?: string | null, userId?: string | null): string {
+  const userTag = userEmail || userId || "guest";
+  const sanitized = userTag.toLowerCase().replace(/[^a-z0-9_]/g, "_");
   return `instafame_boost_orders_user_${sanitized}`;
 }
 
@@ -70,6 +77,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const userEmail = session?.user?.email;
   const userId = (session?.user as any)?.id;
   const currentUserKey = getStorageKey(userEmail, userId);
+  const legacyUserKey = getLegacyStorageKey(userEmail, userId);
 
   // Load user-specific orders when session is determined or changed
   useEffect(() => {
@@ -77,7 +85,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
     currentKeyRef.current = currentUserKey;
     try {
-      const saved = localStorage.getItem(currentUserKey);
+      const saved = localStorage.getItem(currentUserKey) || localStorage.getItem(legacyUserKey);
       if (saved) {
         setOrders(JSON.parse(saved));
       } else {
@@ -88,7 +96,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       setOrders([]);
     }
     setIsInitialized(true);
-  }, [currentUserKey, status]);
+  }, [currentUserKey, legacyUserKey, status]);
 
   // Save to user-specific localStorage whenever orders change
   useEffect(() => {
@@ -100,179 +108,114 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [orders, isInitialized]);
 
-  // Status check helper function for SMMVault API
-  const checkSmmStatusForOrders = useCallback(async (targetOrderId?: string) => {
-    const currentOrders = ordersRef.current;
-    if (currentOrders.length === 0) return;
-
-    const ordersToQuery = targetOrderId
-      ? currentOrders.filter((o) => o.id === targetOrderId || o.smmOrderId === targetOrderId)
-      : currentOrders.filter(
-          (o) =>
-            o.status !== "successful" &&
-            o.status !== "completed" &&
-            o.status !== "canceled"
-        );
-
-    if (ordersToQuery.length === 0) return;
-
+  // Sync orders with database (/api/orders) to check if admin marked them as completed
+  const syncOrdersFromDatabase = useCallback(async () => {
+    const activeEmail = userEmail || session?.user?.email;
+    if (!activeEmail) return;
     setIsPollingStatus(true);
-
     try {
-      for (const order of ordersToQuery) {
-        const queryId = order.smmOrderId || order.id;
+      const res = await fetch(`/api/orders?user_email=${encodeURIComponent(activeEmail)}&t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          const dbOrders: any[] = json.data;
+          setOrders((prevOrders) => {
+            const dbMap = new Map<string, any>();
+            dbOrders.forEach((item) => {
+              if (item.id) dbMap.set(String(item.id), item);
+              if (item.smm_order_id) dbMap.set(String(item.smm_order_id), item);
+            });
 
-        try {
-          const res = await fetch(`/api/smm/status?order=${encodeURIComponent(queryId)}`, {
-            cache: "no-store",
+            // Filter out old orphan local orders (>45s) that do not exist in MySQL database
+            const isFreshLocal = (local: BoostOrder) => Date.now() - (local.createdAt || 0) < 45000;
+            const validLocals = prevOrders.filter(
+              (local) => dbMap.has(local.id) || (local.smmOrderId && dbMap.has(String(local.smmOrderId))) || isFreshLocal(local)
+            );
+
+            // 1. Update existing orders with database status
+            const updated = validLocals.map((local) => {
+              const matched = dbMap.get(local.id) || (local.smmOrderId && dbMap.get(String(local.smmOrderId)));
+              if (!matched) return local;
+
+              const isCompleted = matched.status === "completed" || matched.status === "successful";
+              return {
+                ...local,
+                id: matched.id || local.id,
+                status: isCompleted ? ("completed" as const) : ("ordered" as const),
+                price: typeof matched.price === "number" ? matched.price : parseFloat(matched.price || String(local.price || 0)),
+                packageLabel: matched.package_label || local.packageLabel,
+                lastCheckedAt: Date.now(),
+              };
+            });
+
+            // 2. Also import any orders in the database that might not be in local state yet
+            const existingIds = new Set(updated.map((o) => o.id));
+            dbOrders.forEach((dbO) => {
+              if (!existingIds.has(dbO.id)) {
+                const isCompleted = dbO.status === "completed" || dbO.status === "successful";
+                updated.unshift({
+                  id: dbO.id,
+                  smmOrderId: dbO.smm_order_id || undefined,
+                  type: (dbO.service_type || "followers") as "followers" | "likes" | "views",
+                  username: dbO.target_username || "user",
+                  avatarUrl: "/images/default_avatar.jpg",
+                  packageAmount: dbO.package_amount || 1000,
+                  packageLabel: dbO.package_label || "+1000",
+                  price: typeof dbO.price === "number" ? dbO.price : parseFloat(dbO.price || "0"),
+                  initialCount: dbO.initial_count || 0,
+                  approxAfterCount: dbO.approx_after_count || 0,
+                  currentCount: dbO.current_count || dbO.initial_count || 0,
+                  status: isCompleted ? "completed" : "ordered",
+                  createdAt: dbO.created_at ? new Date(dbO.created_at).getTime() : Date.now(),
+                  userEmail: dbO.user_email || activeEmail,
+                });
+              }
+            });
+
+            return updated;
           });
-
-          if (res.ok) {
-            const data = await res.json();
-            if (data.success) {
-              setOrders((prev) =>
-                prev.map((o) => {
-                  if (o.id !== order.id) return o;
-
-                  const startCount =
-                    data.startCount !== null && data.startCount !== undefined
-                      ? Number(data.startCount)
-                      : o.initialCount;
-                  const remains = data.remains !== undefined ? Number(data.remains) : (o.remains ?? 0);
-
-                  // Calculate delivered quantity
-                  const totalAmt = o.packageAmount || 1000;
-                  const delivered = Math.max(0, totalAmt - remains);
-                  const isFinished =
-                    data.status === "successful" ||
-                    data.status === "completed" ||
-                    (remains === 0 && delivered >= totalAmt);
-
-                  const computedCurrent = isFinished
-                    ? startCount + totalAmt
-                    : Math.max(o.currentCount, startCount + delivered);
-
-                  const mappedStatus = isFinished
-                    ? ("successful" as const)
-                    : data.status === "processing"
-                    ? ("processing" as const)
-                    : data.status === "pending"
-                    ? ("pending" as const)
-                    : data.status === "partial"
-                    ? ("partial" as const)
-                    : data.status === "canceled"
-                    ? ("canceled" as const)
-                    : ("in_progress" as const);
-
-                  const updated: BoostOrder = {
-                    ...o,
-                    initialCount: startCount,
-                    remains: remains,
-                    currentCount: computedCurrent,
-                    approxAfterCount: startCount + totalAmt,
-                    status: mappedStatus,
-                    smmStatus: data.rawStatus || data.status,
-                    displayStatus: data.displayStatus || data.status,
-                    lastCheckedAt: Date.now(),
-                  };
-
-                  // Asynchronously sync updated status and count to backend DB
-                  fetch("/api/orders", {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      id: updated.id,
-                      smm_order_id: updated.smmOrderId,
-                      status: updated.status,
-                      current_count: updated.currentCount,
-                      initial_count: updated.initialCount,
-                      remains: updated.remains,
-                      smm_status: updated.smmStatus,
-                      approx_after_count: updated.approxAfterCount,
-                    }),
-                  }).catch(() => {});
-
-                  return updated;
-                })
-              );
-            }
-          }
-        } catch (err) {
-          console.warn(`SMM status check error for order ${queryId}:`, err);
         }
       }
       setLastSyncTime(Date.now());
+    } catch (err) {
+      console.warn("Error syncing orders from database:", err);
     } finally {
       setIsPollingStatus(false);
     }
-  }, []);
+  }, [userEmail, session?.user?.email]);
 
-  // 30-Second Polling Timer for Order Statuses
+  // Sync on mount and periodically every 15s
   useEffect(() => {
-    // Initial check after 2 seconds on mount
-    const initialTimer = setTimeout(() => {
-      checkSmmStatusForOrders();
-    }, 2000);
+    if (!isInitialized || !userEmail) return;
 
-    // Continuous 30-second interval
-    const interval = setInterval(() => {
-      checkSmmStatusForOrders();
-    }, 30000);
-
-    return () => {
-      clearTimeout(initialTimer);
-      clearInterval(interval);
-    };
-  }, [checkSmmStatusForOrders]);
-
-  // Micro-ticker for smooth UI animation while in progress
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setOrders((prevOrders) => {
-        let hasChanges = false;
-        const updated = prevOrders.map((order) => {
-          if (order.status === "successful" || order.status === "completed" || order.status === "canceled") {
-            return order;
-          }
-
-          if (order.status !== "in_progress") {
-            return order;
-          }
-
-          const remaining = order.approxAfterCount - order.currentCount;
-          if (remaining <= 0) {
-            return {
-              ...order,
-              currentCount: order.approxAfterCount,
-              status: "successful" as const,
-            };
-          }
-
-          // Smooth incremental chunks
-          const step = Math.max(1, Math.min(remaining, Math.ceil(order.packageAmount / 40)));
-          const nextCount = order.currentCount + step;
-          const isDone = nextCount >= order.approxAfterCount;
-
-          hasChanges = true;
-          return {
-            ...order,
-            currentCount: isDone ? order.approxAfterCount : nextCount,
-            status: isDone ? ("successful" as const) : ("in_progress" as const),
-          };
-        });
-
-        return hasChanges ? updated : prevOrders;
-      });
-    }, 2000);
-
+    syncOrdersFromDatabase();
+    const interval = setInterval(syncOrdersFromDatabase, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isInitialized, userEmail, syncOrdersFromDatabase]);
+
+  // Sync immediately whenever user opens cart drawer
+  useEffect(() => {
+    if (isCartOpen && userEmail) {
+      syncOrdersFromDatabase();
+    }
+  }, [isCartOpen, userEmail, syncOrdersFromDatabase]);
 
   const addOrder = async (
     orderData: Omit<BoostOrder, "id" | "currentCount" | "status" | "createdAt" | "userEmail"> & {
       smmOrderId?: string | number;
+      userEmail?: string;
     }
   ): Promise<{ success: boolean; error?: string; order?: BoostOrder; remainingBalance?: number }> => {
+    const effectiveEmail = (orderData.userEmail || userEmail || session?.user?.email || "").trim();
+    if (!effectiveEmail || effectiveEmail === "guest@viralora.com" || effectiveEmail.startsWith("guest")) {
+      return {
+        success: false,
+        error: "Please sign in to your account with Google before placing a boost order.",
+      };
+    }
+
     // Generate order ID and default SMM Order ID
     const randomNumericId = Math.floor(20000 + Math.random() * 80000);
     const orderId = `ORD-${randomNumericId}`;
@@ -284,12 +227,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       smmOrderId: smmOrderId,
       currentCount: orderData.initialCount,
       remains: orderData.packageAmount,
-      status: "pending",
-      displayStatus: "Pending",
-      smmStatus: "Pending",
+      status: "ordered",
+      displayStatus: "Ordered",
       createdAt: Date.now(),
       lastCheckedAt: Date.now(),
-      userEmail: userEmail || "guest@instafame.com",
+      userEmail: effectiveEmail,
     };
 
     try {
@@ -325,25 +267,33 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
-      // Step 2: Wallet deduction succeeded! Dispatch real-time wallet update event to Navbar
+      // Step 2: Wallet deduction succeeded! Dispatch real-time wallet update event
+      const remaining = data?.data?.remaining_wallet_balance;
       if (typeof window !== "undefined") {
-        const remaining = data?.data?.remaining_wallet_balance;
         window.dispatchEvent(new CustomEvent("wallet_updated", { detail: { balance: remaining } }));
       }
 
+      // Confirmed database record
+      const confirmedOrder: BoostOrder = {
+        ...newOrder,
+        id: data?.data?.id || newOrder.id,
+        price: typeof data?.data?.price === "number" ? data.data.price : newOrder.price,
+        smmOrderId: data?.data?.smm_order_id || newOrder.smmOrderId,
+      };
+
       // Step 3: Add to active cart & open cart drawer
-      setOrders((prev) => [newOrder, ...prev]);
+      setOrders((prev) => [confirmedOrder, ...prev.filter((o) => o.id !== confirmedOrder.id)]);
       setIsCartOpen(true);
 
-      // Trigger immediate status check for this new order
+      // Trigger immediate sync from database
       setTimeout(() => {
-        checkSmmStatusForOrders(newOrder.id);
-      }, 1000);
+        syncOrdersFromDatabase();
+      }, 500);
 
       return {
         success: true,
-        order: newOrder,
-        remainingBalance: data?.data?.remaining_wallet_balance,
+        order: confirmedOrder,
+        remainingBalance: remaining,
       };
     } catch (err: any) {
       console.error("Order processing error:", err);
@@ -366,14 +316,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setOrders((prev) =>
       prev.map((o) => (o.id === orderId ? { ...o, smmOrderId: smmOrderId } : o))
     );
-    // Refresh status with new SMM ID
-    setTimeout(() => {
-      checkSmmStatusForOrders(orderId);
-    }, 500);
   };
 
-  const refreshOrderStatus = async (orderId?: string) => {
-    await checkSmmStatusForOrders(orderId);
+  const refreshOrderStatus = async () => {
+    await syncOrdersFromDatabase();
   };
 
   const activeOrdersCount = orders.filter(

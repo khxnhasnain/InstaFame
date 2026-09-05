@@ -40,6 +40,7 @@ venv.bak/
 backend/fallback_db.json
 backend/sessions/
 backend/scratch/
+backend/uploads/
 *.sqlite3
 *.tsbuildinfo
 

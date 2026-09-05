@@ -8,7 +8,6 @@ import {
   Wallet,
   PlusCircle,
   ArrowLeft,
-  ArrowRight,
   ArrowDownLeft,
   ArrowUpRight,
   ShoppingBag,
@@ -21,6 +20,13 @@ import {
   AlertCircle,
   Database,
   Filter,
+  QrCode,
+  Check,
+  Upload,
+  Eye,
+  X,
+  FileImage,
+  Info,
 } from "lucide-react";
 import Navbar from "@/components/common/Navbar";
 
@@ -50,6 +56,19 @@ interface OrderRecord {
   created_at: string;
 }
 
+interface DepositRecord {
+  id: string;
+  user_id: string;
+  amount: number;
+  utr: string;
+  payment_screenshot: string;
+  status: "pending" | "approved" | "rejected";
+  rejection_reason?: string;
+  created_at: string;
+  approved_at?: string;
+  rejected_at?: string;
+}
+
 export default function WalletPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -62,26 +81,72 @@ export default function WalletPage() {
   }, [status, router]);
 
   const [walletBalance, setWalletBalance] = useState<number>(50.0);
-  const [addAmount, setAddAmount] = useState<string>("500");
-  const [isSubmittingFunds, setIsSubmittingFunds] = useState<boolean>(false);
-  const [fundSuccessMsg, setFundSuccessMsg] = useState<string | null>(null);
-  const [fundErrorMsg, setFundErrorMsg] = useState<string | null>(null);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
+  const [deposits, setDeposits] = useState<DepositRecord[]>([]);
   const [filterType, setFilterType] = useState<"all" | "credit" | "debit">("all");
+  const [historyTab, setHistoryTab] = useState<"transactions" | "deposits">("transactions");
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // UPI Deposit States
+  const [depositAmount, setDepositAmount] = useState<string>("500");
+  const [utr, setUtr] = useState<string>("");
+  const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
+  const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
+  const [isSubmittingDeposit, setIsSubmittingDeposit] = useState<boolean>(false);
+  const [depositSuccessMsg, setDepositSuccessMsg] = useState<string | null>(null);
+  const [depositErrorMsg, setDepositErrorMsg] = useState<string | null>(null);
+  const [isCheckingUtr, setIsCheckingUtr] = useState<boolean>(false);
+  const [utrExistsError, setUtrExistsError] = useState<string | null>(null);
+
+  // Dynamic QR States
+  const [dynamicQrUrl, setDynamicQrUrl] = useState<string | null>(null);
+  const [isLoadingQr, setIsLoadingQr] = useState<boolean>(false);
+  const [previewScreenshotId, setPreviewScreenshotId] = useState<string | null>(null);
+
   const userEmail = session?.user?.email;
+
+  // Load dynamic QR code whenever deposit amount changes
+  useEffect(() => {
+    const num = parseFloat(depositAmount);
+    if (isNaN(num) || num < 100 || num > 50000) {
+      setDynamicQrUrl(null);
+      return;
+    }
+
+    let active = true;
+    setIsLoadingQr(true);
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/wallet/upi-qr?amount=${encodeURIComponent(num)}`);
+        if (res.ok && active) {
+          const data = await res.json();
+          setDynamicQrUrl(data.qr_data_url || null);
+        }
+      } catch (err) {
+        console.error("Failed to load dynamic QR:", err);
+      } finally {
+        if (active) setIsLoadingQr(false);
+      }
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [depositAmount]);
 
   const fetchWalletData = async () => {
     if (!userEmail) return;
     setIsLoading(true);
     try {
       const ts = Date.now();
-      const [walletRes, ordersRes, txnsRes] = await Promise.all([
+      const [walletRes, ordersRes, txnsRes, depositsRes] = await Promise.all([
         fetch(`/api/wallet?user_email=${encodeURIComponent(userEmail)}&t=${ts}`, { cache: "no-store" }),
         fetch(`/api/orders?user_email=${encodeURIComponent(userEmail)}&t=${ts}`, { cache: "no-store" }),
         fetch(`/api/wallet/transactions?user_email=${encodeURIComponent(userEmail)}&t=${ts}`, { cache: "no-store" }),
+        fetch(`/api/wallet/deposits?t=${ts}`, { cache: "no-store" }),
       ]);
 
       if (walletRes.ok) {
@@ -105,7 +170,6 @@ export default function WalletPage() {
         if (tData && Array.isArray(tData.data) && tData.data.length > 0) {
           setTransactions(tData.data);
         } else if (fetchedOrders.length > 0) {
-          // Fallback synthesize from orders if transactions table was just initialized
           const synthesized: TransactionRecord[] = fetchedOrders.map((o) => ({
             id: `TXN-${o.id}`,
             user_email: o.user_email,
@@ -120,6 +184,13 @@ export default function WalletPage() {
           setTransactions(synthesized);
         } else {
           setTransactions([]);
+        }
+      }
+
+      if (depositsRes.ok) {
+        const dData = await depositsRes.json();
+        if (dData && dData.data && Array.isArray(dData.data.items)) {
+          setDeposits(dData.data.items);
         }
       }
     } catch (err) {
@@ -145,425 +216,775 @@ export default function WalletPage() {
     return () => window.removeEventListener("wallet_updated", handleWalletUpdated);
   }, [userEmail, status]);
 
-  const handleAddFunds = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFundErrorMsg(null);
-    setFundSuccessMsg(null);
+  const handleScreenshotChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    if (!userEmail) {
-      setFundErrorMsg("Please sign in to add funds to your wallet.");
+    if (file.size > 5 * 1024 * 1024) {
+      setDepositErrorMsg("Screenshot file size must be less than 5 MB.");
       return;
     }
 
-    const num = parseFloat(addAmount);
-    if (isNaN(num) || num <= 0) {
-      setFundErrorMsg("Please enter a valid amount greater than 0.");
+    const validTypes = ["image/jpeg", "image/png", "image/webp"];
+    if (!validTypes.includes(file.type.toLowerCase())) {
+      setDepositErrorMsg("Screenshot must be an image (JPG, PNG, or WEBP).");
       return;
     }
 
-    setIsSubmittingFunds(true);
-    try {
-      const res = await fetch("/api/wallet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_email: userEmail,
-          amount: num,
-          description: `Wallet Top-Up (+₹${num.toFixed(2)}) via Automated Recharge`,
-        }),
-      });
+    setDepositErrorMsg(null);
+    setScreenshotFile(file);
+    const url = URL.createObjectURL(file);
+    setScreenshotPreview(url);
+  };
 
-      if (res.ok) {
-        const data = await res.json();
-        const newBal = data?.data?.wallet_balance ?? (walletBalance + num);
-        setWalletBalance(newBal);
-        setFundSuccessMsg(`Successfully credited ₹${num.toFixed(2)} to your wallet balance!`);
-
-        // Refresh transactions list
-        await fetchWalletData();
-
-        // Dispatch event for other components
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("wallet_updated", { detail: { balance: newBal } }));
-        }
-
-        setTimeout(() => {
-          setFundSuccessMsg(null);
-        }, 4000);
-      } else {
-        setFundErrorMsg("Failed to add funds. Please try again.");
-      }
-    } catch (err: any) {
-      setFundErrorMsg(err?.message || "An unexpected error occurred.");
-    } finally {
-      setIsSubmittingFunds(false);
+  const handleUtrChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Strictly numeric digits only, max 12
+    const clean = e.target.value.replace(/[^0-9]/g, "").slice(0, 12);
+    setUtr(clean);
+    if (clean.length !== 12) {
+      setUtrExistsError(null);
     }
   };
 
-  // Calculate total spent on orders & total deposited
-  const totalSpent = orders.reduce((sum, o) => sum + Number(o.price || 0), 0);
-  const totalDeposited = transactions
-    .filter((t) => t.type === "credit")
-    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  // Real-time UTR duplicate check strictly against wallet_deposits in database
+  useEffect(() => {
+    const cleanUtr = utr.trim();
+    if (cleanUtr.length !== 12 || !/^[0-9]{12}$/.test(cleanUtr)) {
+      setUtrExistsError(null);
+      setIsCheckingUtr(false);
+      return;
+    }
 
-  // Filter transactions based on active tab
+    let isMounted = true;
+    setIsCheckingUtr(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/wallet/deposits/check-utr?utr=${encodeURIComponent(cleanUtr)}`);
+        const data = await res.json();
+        if (isMounted) {
+          if (data && data.exists) {
+            setUtrExistsError(
+              `This UTR / Transaction ID (${cleanUtr}) has already been submitted in wallet deposits. Duplicate submissions are strictly rejected and cannot be accepted for verification.`
+            );
+          } else {
+            setUtrExistsError(null);
+          }
+        }
+      } catch {
+        // Fallback gracefully on network hiccup
+      } finally {
+        if (isMounted) {
+          setIsCheckingUtr(false);
+        }
+      }
+    }, 350);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [utr]);
+
+  const handleSubmitDeposit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDepositErrorMsg(null);
+    setDepositSuccessMsg(null);
+
+    if (!session || !userEmail) {
+      setDepositErrorMsg("Please sign in to submit a wallet deposit.");
+      return;
+    }
+
+    const num = parseFloat(depositAmount);
+    if (isNaN(num) || num < 100 || num > 50000) {
+      setDepositErrorMsg("Deposit amount must be between ₹100.00 and ₹50,000.00.");
+      return;
+    }
+
+    if (!/^[0-9]{12}$/.test(utr.trim())) {
+      setDepositErrorMsg("UTR / Transaction ID must be exactly 12 numeric digits.");
+      return;
+    }
+
+    if (utrExistsError) {
+      setDepositErrorMsg(utrExistsError);
+      return;
+    }
+
+    if (!screenshotFile) {
+      setDepositErrorMsg("Please upload your payment screenshot.");
+      return;
+    }
+
+    setIsSubmittingDeposit(true);
+    try {
+      const formData = new FormData();
+      formData.append("amount", num.toString());
+      formData.append("utr", utr.trim());
+      formData.append("screenshot", screenshotFile);
+
+      const res = await fetch("/api/wallet/deposits", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDepositSuccessMsg(
+          `Deposit request submitted! Status: Pending Admin Verification. Your wallet will be credited with ₹${num.toFixed(
+            2
+          )} once verified.`
+        );
+        setUtr("");
+        setScreenshotFile(null);
+        setScreenshotPreview(null);
+        setUtrExistsError(null);
+        setHistoryTab("deposits");
+        await fetchWalletData();
+      } else {
+        // If rejected due to duplicate UTR or other reason
+        setDepositErrorMsg(
+          data.error || "Deposit rejected. This UTR already exists in the database or could not be processed."
+        );
+        if (data.error && data.error.toLowerCase().includes("already been submitted")) {
+          setUtrExistsError(data.error);
+        }
+      }
+    } catch (err: any) {
+      setDepositErrorMsg(err?.message || "An unexpected error occurred while submitting deposit.");
+    } finally {
+      setIsSubmittingDeposit(false);
+    }
+  };
+
+  const successfulCreditsCount = transactions.filter(
+    (t) => t.type === "credit" && t.status === "successful"
+  ).length;
+
+  const debitsCount = transactions.filter((t) => t.type === "debit").length;
+
   const filteredTransactions = transactions.filter((t) => {
-    if (filterType === "credit") return t.type === "credit";
-    if (filterType === "debit") return t.type === "debit";
+    if (filterType === "all") return true;
+    if (filterType === "credit") {
+      return t.type.toLowerCase() === "credit" && t.status === "successful";
+    }
+    if (filterType === "debit") {
+      return t.type.toLowerCase() === "debit";
+    }
     return true;
   });
 
-  const creditCount = transactions.filter((t) => t.type === "credit").length;
-  const debitCount = transactions.filter((t) => t.type === "debit").length;
-
-  if (status === "loading") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (status === "unauthenticated" || !session) {
-    return null;
-  }
+  const totalSpent = transactions
+    .filter((t) => t.type === "debit" && t.status !== "rejected")
+    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-pink-500 selection:text-white">
       <Navbar />
 
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8">
-        {/* Header Title & Breadcrumb */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 shadow-lg shadow-emerald-500/20">
-              <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
-                <Wallet className="w-6 h-6 text-emerald-400" />
-              </div>
-            </div>
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2">
-                InstaFame Digital Wallet
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-400">
-                Manage your balance, add funds, and view database transaction records
-              </p>
-            </div>
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8">
+        {/* Top Header Navigation */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-black text-white flex items-center gap-2.5 tracking-tight">
+              <span>My Wallet &amp; Balance</span>
+              <span className="text-xs font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                UPI Deposit
+              </span>
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+              Manage your wallet credits, scan amount-specific UPI QR, and track verified deposit history
+            </p>
           </div>
 
           <div className="flex items-center gap-3">
             <Link
-              href="/dashboard"
-              className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl border border-slate-800 text-xs font-bold transition-all"
+              href="/"
+              className="px-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-xs font-bold flex items-center gap-2 transition-all cursor-pointer"
             >
-              <ArrowLeft className="w-4 h-4 text-slate-400" />
-              <span>Back to Dashboard</span>
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back</span>
             </Link>
-
             <button
               onClick={fetchWalletData}
               disabled={isLoading}
-              className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white px-3.5 py-2.5 rounded-xl border border-slate-800 text-xs font-bold transition-all cursor-pointer"
-              title="Refresh Balance & Database Records"
+              className="px-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-xs font-bold flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin text-emerald-400" : ""}`} />
+              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin text-pink-400" : ""}`} />
+              <span>Refresh Balance</span>
             </button>
           </div>
         </div>
 
-        {/* Top Balance Card */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-emerald-950/60 via-slate-900 to-slate-900 border border-emerald-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-emerald-950/40 flex flex-col justify-between space-y-6">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-widest text-emerald-400">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Available Balance</span>
-            </div>
-            <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 flex items-center gap-1.5">
-              <Database className="w-3.5 h-3.5 text-emerald-400" />
-              <span>DB Synchronized Wallet</span>
-            </span>
-          </div>
-
-          <div className="space-y-1">
-            <span className="text-xs text-slate-400 font-medium">Total Funds</span>
-            <div className="text-4xl sm:text-5xl font-black text-white font-mono tracking-tight flex items-baseline gap-1">
-              <span className="text-emerald-400 text-3xl sm:text-4xl font-bold">₹</span>
-              <span>{walletBalance.toFixed(2)}</span>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-6 pt-4 border-t border-slate-800/80 text-xs text-slate-400">
-            <div>
-              <span className="block text-[11px] text-slate-500">Account Email</span>
-              <span className="font-bold text-slate-300 font-mono">{userEmail || "Guest User"}</span>
+        {/* Section 1: Balance Stats Summary Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          {/* Main Wallet Balance Card */}
+          <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-900/90 to-slate-950 border border-slate-800/80 rounded-3xl p-6 sm:p-8 space-y-4 shadow-2xl">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none" />
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Wallet className="w-4 h-4 text-emerald-400" />
+                <span>Available Balance</span>
+              </span>
+              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                INR Live
+              </span>
             </div>
             <div>
-              <span className="block text-[11px] text-slate-500">Total Spent on Boosts</span>
-              <span className="font-bold text-rose-400 font-mono">₹{totalSpent.toFixed(2)}</span>
-            </div>
-            {totalDeposited > 0 && (
-              <div>
-                <span className="block text-[11px] text-slate-500">Total Recharged</span>
-                <span className="font-bold text-emerald-400 font-mono">+₹{totalDeposited.toFixed(2)}</span>
+              <div className="text-3xl sm:text-4xl lg:text-5xl font-black text-white tracking-tight flex items-baseline gap-1">
+                <span className="text-emerald-400 font-normal">₹</span>
+                <span>{walletBalance.toFixed(2)}</span>
               </div>
-            )}
-            <div>
-              <span className="block text-[11px] text-slate-500">DB Transactions</span>
-              <span className="font-bold text-white font-mono">{transactions.length} records</span>
+              <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5 font-medium">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>100% Secure Verification</span>
+              </p>
             </div>
+          </div>
+
+          {/* Total Spent on Boosts */}
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-3xl p-6 sm:p-8 space-y-3 shadow-xl">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <TrendingDown className="w-4 h-4 text-pink-400" />
+              <span>Total Boost Orders Spent</span>
+            </span>
+            <div className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-baseline gap-1">
+              <span className="text-pink-400 font-normal">₹</span>
+              <span>{totalSpent.toFixed(2)}</span>
+            </div>
+            <p className="text-xs text-slate-400">
+              Used across {orders.length} growth booster {orders.length === 1 ? "order" : "orders"}
+            </p>
           </div>
         </div>
 
-        {/* Section 2: Add Funds / Recharge Form */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-4">
+        {/* Section 2: UPI Wallet Deposit System */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl relative overflow-hidden">
+          <div className="border-b border-slate-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
               <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
                 <PlusCircle className="w-5 h-5 text-emerald-400" />
-                <span>Add Funds / Recharge Wallet</span>
+                <span>Add Money via UPI QR Code</span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Top up money directly into your account — automatically logged to Database
+                Scan dynamic amount QR code, complete payment in your UPI app, and submit your 12-digit UTR
               </p>
             </div>
-            <span className="text-xs font-semibold text-slate-500">Instant Automated Crediting</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-extrabold px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                <span>Admin Verification</span>
+              </span>
+            </div>
           </div>
 
-          {fundSuccessMsg && (
-            <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-800 text-emerald-300 font-extrabold text-sm flex items-center gap-2 animate-in fade-in">
-              <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-              <span>{fundSuccessMsg}</span>
+          {depositSuccessMsg && (
+            <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-800 text-emerald-300 font-bold text-sm flex items-start gap-3 animate-in fade-in">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <span>{depositSuccessMsg}</span>
+                <p className="text-xs text-emerald-400/80 font-normal">
+                  You can track the verification progress anytime under the <strong>Deposits History</strong> tab below.
+                </p>
+              </div>
             </div>
           )}
 
-          {fundErrorMsg && (
-            <div className="p-4 rounded-2xl bg-red-950/60 border border-red-800 text-red-300 font-extrabold text-sm flex items-center gap-2 animate-in fade-in">
+          {depositErrorMsg && (
+            <div className="p-4 rounded-2xl bg-red-950/60 border border-red-800 text-red-300 font-bold text-sm flex items-center gap-2 animate-in fade-in">
               <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-              <span>{fundErrorMsg}</span>
+              <span>{depositErrorMsg}</span>
             </div>
           )}
 
-          <form onSubmit={handleAddFunds} className="space-y-5">
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-                Enter Amount to Add (₹ INR)
-              </label>
-              <div className="relative max-w-md">
-                <span className="absolute left-4 top-3 text-slate-400 font-black text-xl">₹</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={addAmount}
-                  onChange={(e) => setAddAmount(e.target.value)}
-                  placeholder="500"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-10 pr-4 py-3.5 text-xl font-black text-white focus:outline-hidden focus:border-emerald-500 transition-colors shadow-inner"
-                />
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            {/* Left Column: QR Code & Payment Details */}
+            <div className="lg:col-span-5 flex flex-col items-center justify-center p-6 rounded-3xl bg-slate-950 border border-slate-800/80 space-y-4 text-center">
+              <div className="flex items-center justify-center w-full pb-2.5 border-b border-slate-800">
+                <span className="text-sm sm:text-base font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                  <QrCode className="w-5 h-5 text-pink-400" />
+                  <span>QR Code</span>
+                </span>
               </div>
-            </div>
 
-            {/* Quick Amount Select Buttons */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-400 block">Quick Top-Up Amounts</span>
-              <div className="flex flex-wrap gap-2.5">
-                {["100", "250", "500", "1000", "2500", "5000"].map((amt) => {
-                  const isSelected = addAmount === amt;
-                  return (
-                    <button
-                      key={amt}
-                      type="button"
-                      onClick={() => setAddAmount(amt)}
-                      className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                        isSelected
-                          ? "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20 font-black scale-105"
-                          : "bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white"
-                      }`}
-                    >
-                      +₹{amt}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={isSubmittingFunds}
-                className="max-w-md w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:opacity-95 text-white font-black text-sm shadow-xl shadow-emerald-600/25 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98] disabled:opacity-50"
-              >
-                {isSubmittingFunds ? (
-                  <>
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                    <span>Saving to Database &amp; Crediting...</span>
-                  </>
+              {/* QR Code Container */}
+              <div className="relative p-4 rounded-2xl bg-white shadow-2xl flex items-center justify-center min-w-[220px] min-h-[220px]">
+                {isLoadingQr ? (
+                  <div className="flex flex-col items-center justify-center p-8 space-y-2 text-slate-700">
+                    <RefreshCw className="w-8 h-8 animate-spin text-pink-600" />
+                    <span className="text-xs font-bold">Generating QR...</span>
+                  </div>
+                ) : dynamicQrUrl ? (
+                  <img
+                    src={dynamicQrUrl}
+                    alt={`Dynamic UPI QR for ₹${depositAmount}`}
+                    className="w-[200px] h-[200px] object-contain rounded-lg"
+                  />
                 ) : (
-                  <>
-                    <PlusCircle className="w-5 h-5" />
-                    <span>Add ₹{Number(addAmount || 0).toFixed(2)} to Wallet Balance</span>
-                  </>
+                  <div className="text-xs text-slate-500 p-8">Enter a valid amount to generate QR</div>
                 )}
-              </button>
+              </div>
+
+              {/* Amount Pre-fill Notice */}
+              <div className="text-xs text-slate-400 space-y-1">
+                <p className="font-semibold text-slate-200">
+                  Scanning this QR code pre-fills <strong>₹{depositAmount || "0"}</strong> in your UPI app.
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Supported apps: Google Pay, PhonePe, Paytm, BHIM, Axis UPI, etc.
+                </p>
+              </div>
             </div>
-          </form>
+
+            {/* Right Column: Amount Selection, UTR & Screenshot Form */}
+            <div className="lg:col-span-7">
+              <form onSubmit={handleSubmitDeposit} className="space-y-5">
+                {/* 1. Amount Selection */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    1. Select or Enter Amount to Add (₹ INR)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-3.5 text-slate-400 font-black text-xl">₹</span>
+                    <input
+                      type="number"
+                      min={100}
+                      max={50000}
+                      step="1"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      placeholder="500"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-10 pr-4 py-3 text-lg font-black text-white focus:outline-hidden focus:border-pink-500 transition-colors shadow-inner"
+                    />
+                  </div>
+
+                  {/* Preset Amount Chips */}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {["100", "500", "1000", "2000", "5000", "10000"].map((amt) => {
+                      const isSelected = depositAmount === amt;
+                      return (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => setDepositAmount(amt)}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-gradient-to-r from-pink-500 to-indigo-600 text-white shadow-md shadow-pink-500/20 scale-105"
+                              : "bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white"
+                          }`}
+                        >
+                          ₹{amt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. Strict 12-Digit Numeric UTR Input */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      2. Enter 12-Digit UTR / Transaction ID
+                    </label>
+                    <div className="flex items-center gap-2">
+                      {isCheckingUtr && (
+                        <span className="text-xs text-amber-400 flex items-center gap-1 font-bold">
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                          Checking DB...
+                        </span>
+                      )}
+                      {utr.length === 12 && !isCheckingUtr && !utrExistsError && (
+                        <span className="text-xs text-emerald-400 flex items-center gap-1 font-bold">
+                          <Check className="w-3 h-3" />
+                          UTR Unique
+                        </span>
+                      )}
+                      <span
+                        className={`text-xs font-mono font-bold ${
+                          utrExistsError
+                            ? "text-rose-400 font-black"
+                            : utr.length === 12
+                            ? "text-emerald-400 font-black"
+                            : "text-slate-500"
+                        }`}
+                      >
+                        {utr.length} / 12 digits
+                      </span>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={12}
+                    value={utr}
+                    onChange={handleUtrChange}
+                    placeholder="e.g. 123456789012"
+                    className={`w-full bg-slate-950 border rounded-2xl px-4 py-3 text-base font-mono font-bold text-white placeholder:text-slate-600 focus:outline-hidden transition-colors shadow-inner ${
+                      utrExistsError
+                        ? "border-rose-500/80 focus:border-rose-500 bg-rose-950/20"
+                        : "border-slate-800 focus:border-pink-500"
+                    }`}
+                  />
+                  {utrExistsError ? (
+                    <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-start gap-2.5 text-rose-400 text-xs">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">UTR Already Exists in Database</p>
+                        <p className="text-[11px] mt-0.5 text-rose-300/90">{utrExistsError}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-500">
+                      Find this 12-digit numeric Reference / UTR in your payment confirmation inside Google Pay, PhonePe, or Paytm.
+                    </p>
+                  )}
+                </div>
+
+                {/* 3. Screenshot Upload */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    3. Upload Payment Screenshot (Max 5 MB)
+                  </label>
+                  <div className="flex flex-col sm:flex-row items-center gap-4">
+                    <label className="w-full sm:w-auto flex-1 cursor-pointer flex items-center justify-center gap-2 p-3.5 rounded-2xl bg-slate-950 border border-dashed border-slate-800 hover:border-pink-500/60 text-slate-300 hover:text-white transition-all text-xs font-bold">
+                      <Upload className="w-4 h-4 text-pink-400" />
+                      <span>{screenshotFile ? screenshotFile.name : "Select Screenshot (JPG, PNG, WEBP)"}</span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={handleScreenshotChange}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {screenshotPreview && (
+                      <div className="relative group w-14 h-14 rounded-xl overflow-hidden border border-slate-800 flex-shrink-0">
+                        <img src={screenshotPreview} alt="Screenshot Preview" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScreenshotFile(null);
+                            setScreenshotPreview(null);
+                          }}
+                          className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-rose-400 transition-opacity"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Submit Button */}
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={isSubmittingDeposit || isCheckingUtr || Boolean(utrExistsError) || utr.length !== 12 || !screenshotFile}
+                    className="w-full py-4 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-600 to-indigo-600 hover:opacity-95 text-white font-black text-sm shadow-xl shadow-pink-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSubmittingDeposit ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        <span>Verifying &amp; Submitting Deposit...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-5 h-5" />
+                        <span>Submit Deposit for Verification (₹{depositAmount})</span>
+                      </>
+                    )}
+                  </button>
+                  <p className="text-[11px] text-slate-500 text-center mt-2 flex items-center justify-center gap-1">
+                    <Info className="w-3.5 h-3.5" />
+                    <span>Submitting does not credit wallet automatically. Admin verifies bank transaction.</span>
+                  </p>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
 
-        {/* Section 3: Transaction & Order History */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
-            <div>
-              <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
-                <Clock className="w-5 h-5 text-indigo-400" />
-                <span>Wallet Transactions &amp; Orders History</span>
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Complete database log of funds credited and boost order debits
-              </p>
+        {/* Section 3: History Tabs (Ledger & Deposit Requests) */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setHistoryTab("transactions")}
+                className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                  historyTab === "transactions"
+                    ? "bg-gradient-to-r from-pink-500 to-indigo-600 text-white shadow-md shadow-pink-500/20"
+                    : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                }`}
+              >
+                Wallet Ledger Transactions ({transactions.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setHistoryTab("deposits")}
+                className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                  historyTab === "deposits"
+                    ? "bg-gradient-to-r from-pink-500 to-indigo-600 text-white shadow-md shadow-pink-500/20"
+                    : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                }`}
+              >
+                Deposits History ({deposits.length})
+              </button>
             </div>
 
-            {/* Filter Tabs */}
-            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => setFilterType("all")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                  filterType === "all"
-                    ? "bg-slate-800 text-white shadow-xs"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                All ({transactions.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterType("credit")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
-                  filterType === "credit"
-                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <ArrowDownLeft className="w-3 h-3 text-emerald-400" />
-                <span>Top-Ups ({creditCount})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterType("debit")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
-                  filterType === "debit"
-                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <ArrowUpRight className="w-3 h-3 text-rose-400" />
-                <span>Boost Orders ({debitCount})</span>
-              </button>
-            </div>
+            {historyTab === "transactions" && (
+              <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setFilterType("all")}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                    filterType === "all" ? "bg-slate-800 text-white font-black" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  All ({transactions.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterType("credit")}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                    filterType === "credit" ? "bg-emerald-600 text-white font-black" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Credits ({successfulCreditsCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterType("debit")}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                    filterType === "debit" ? "bg-pink-600 text-white font-black" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Debits ({debitsCount})
+                </button>
+              </div>
+            )}
           </div>
 
-          {filteredTransactions.length === 0 ? (
-            <div className="p-12 text-center space-y-3 bg-slate-950/60 rounded-2xl border border-slate-800/60">
-              <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center mx-auto text-slate-600">
-                <ShoppingBag className="w-6 h-6" />
-              </div>
-              <p className="text-sm font-bold text-slate-400">
-                {filterType === "all"
-                  ? "No transactions or boost orders recorded in database yet."
-                  : filterType === "credit"
-                  ? "No wallet top-up transactions found."
-                  : "No boost order debit transactions found."}
-              </p>
-              <p className="text-xs text-slate-500">
-                Top up funds above or launch an Instagram Boost to see records appear in real-time.
-              </p>
-              <Link
-                href="/instagram"
-                className="inline-flex items-center gap-2 mt-2 bg-gradient-to-r from-instagram-orange to-instagram-pink text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md"
-              >
-                <span>Launch First Boost</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-300">
-                <thead className="bg-slate-950 text-slate-400 uppercase font-black tracking-wider text-[10px] border-b border-slate-800">
-                  <tr>
-                    <th className="p-3.5">Record / Ref ID</th>
-                    <th className="p-3.5">Type</th>
-                    <th className="p-3.5">Description</th>
-                    <th className="p-3.5">Amount</th>
-                    <th className="p-3.5">Balance After</th>
-                    <th className="p-3.5">Status</th>
-                    <th className="p-3.5">Date &amp; Time</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 font-medium">
-                  {filteredTransactions.map((t) => {
-                    const isCredit = t.type === "credit";
-                    return (
-                      <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5 font-mono font-bold text-indigo-400">
-                          #{t.id}
-                        </td>
-                        <td className="p-3.5">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-extrabold text-[10px] uppercase ${
-                              isCredit
-                                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                                : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
-                            }`}
-                          >
-                            {isCredit ? (
-                              <>
-                                <ArrowDownLeft className="w-3 h-3" />
-                                <span>Credit (+ Top-Up)</span>
-                              </>
-                            ) : (
-                              <>
-                                <ArrowUpRight className="w-3 h-3" />
-                                <span>Debit (- Order)</span>
-                              </>
-                            )}
-                          </span>
-                        </td>
-                        <td className="p-3.5 font-bold text-white max-w-xs truncate">
-                          {t.description || (isCredit ? "Wallet Top-Up" : `${t.service_type} Boost`)}
-                        </td>
-                        <td className="p-3.5 font-black font-mono">
-                          <span className={isCredit ? "text-emerald-400" : "text-rose-400"}>
-                            {isCredit ? "+" : "-"}₹{Number(t.amount || 0).toFixed(2)}
-                          </span>
-                        </td>
-                        <td className="p-3.5 font-mono text-slate-400">
-                          {typeof t.balance_after === "number" ? `₹${t.balance_after.toFixed(2)}` : "—"}
-                        </td>
-                        <td className="p-3.5">
-                          <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                              t.status === "successful" || t.status === "completed"
-                                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                                : t.status === "ordered"
-                                ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                                : "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                            }`}
-                          >
-                            {t.status || "successful"}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-slate-500 font-mono whitespace-nowrap">
-                          {new Date(t.created_at).toLocaleString()}
-                        </td>
+          {/* Tab Content A: Wallet Transactions Ledger */}
+          {historyTab === "transactions" && (
+            <div className="space-y-4">
+              {filteredTransactions.length === 0 ? (
+                <div className="text-center py-12 space-y-3 bg-slate-950/60 rounded-2xl border border-slate-800/80">
+                  <Database className="w-10 h-10 text-slate-600 mx-auto" />
+                  <h3 className="text-sm font-bold text-slate-300">No Transactions Found</h3>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    Your wallet balance transactions will automatically appear here once credits or boost purchases occur.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400 font-extrabold uppercase tracking-wider">
+                        <th className="pb-3 px-3">Type / Status</th>
+                        <th className="pb-3 px-3">Amount</th>
+                        <th className="pb-3 px-3">Description</th>
+                        <th className="pb-3 px-3">Balance After</th>
+                        <th className="pb-3 px-3">Date</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-medium">
+                      {filteredTransactions.map((txn) => {
+                        const isDebit = txn.type === "debit";
+                        const isRejected = txn.status === "rejected";
+                        const isPending = txn.status === "pending";
+
+                        return (
+                          <tr key={txn.id} className="hover:bg-slate-850/50 transition-colors">
+                            <td className="py-3.5 px-3">
+                              {isRejected ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                  <X className="w-3 h-3" />
+                                  <span>Rejected</span>
+                                </span>
+                              ) : isPending ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                  <Clock className="w-3 h-3" />
+                                  <span>Pending</span>
+                                </span>
+                              ) : isDebit ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                                  <ArrowUpRight className="w-3 h-3" />
+                                  <span>Debit</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                  <ArrowDownLeft className="w-3 h-3" />
+                                  <span>Credit</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-3 font-black text-sm">
+                              {isRejected ? (
+                                <span className="text-rose-400/80 line-through">
+                                  ₹{Number(txn.amount || 0).toFixed(2)}
+                                </span>
+                              ) : isPending ? (
+                                <span className="text-amber-400 font-bold">
+                                  ₹{Number(txn.amount || 0).toFixed(2)}{" "}
+                                  <span className="text-[10px] text-amber-400/70 font-semibold">(Pending)</span>
+                                </span>
+                              ) : isDebit ? (
+                                <span className="text-pink-400">
+                                  -₹{Number(txn.amount || 0).toFixed(2)}
+                                </span>
+                              ) : (
+                                <span className="text-emerald-400">
+                                  +₹{Number(txn.amount || 0).toFixed(2)}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-3 text-slate-300 font-semibold">
+                              <div>{txn.description}</div>
+                              {isRejected && (
+                                <div className="text-[11px] text-rose-400/80 font-normal mt-0.5">
+                                  Deposit was rejected by admin. Wallet balance was not credited.
+                                </div>
+                              )}
+                              {isPending && (
+                                <div className="text-[11px] text-amber-400/80 font-normal mt-0.5">
+                                  Verification in progress. Wallet will be credited once approved.
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-3 font-mono text-slate-400">
+                              {txn.balance_after !== undefined ? `₹${Number(txn.balance_after).toFixed(2)}` : "-"}
+                            </td>
+                            <td className="py-3.5 px-3 text-slate-500">
+                              {new Date(txn.created_at).toLocaleString("en-IN", {
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab Content B: Deposits History */}
+          {historyTab === "deposits" && (
+            <div className="space-y-4">
+              {deposits.length === 0 ? (
+                <div className="text-center py-12 space-y-3 bg-slate-950/60 rounded-2xl border border-slate-800/80">
+                  <Clock className="w-10 h-10 text-slate-600 mx-auto" />
+                  <h3 className="text-sm font-bold text-slate-300">No Deposits Yet</h3>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    When you submit a UPI deposit with UTR and screenshot, its verification progress will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400 font-extrabold uppercase tracking-wider">
+                        <th className="pb-3 px-3">Deposit ID</th>
+                        <th className="pb-3 px-3">Requested Amount</th>
+                        <th className="pb-3 px-3">12-Digit UTR</th>
+                        <th className="pb-3 px-3">Status</th>
+                        <th className="pb-3 px-3">Screenshot</th>
+                        <th className="pb-3 px-3">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-medium">
+                      {deposits.map((dep) => {
+                        return (
+                          <tr key={dep.id} className="hover:bg-slate-850/50 transition-colors">
+                            <td className="py-3.5 px-3 font-mono font-bold text-slate-300">{dep.id}</td>
+                            <td className="py-3.5 px-3 font-black text-sm text-white">₹{Number(dep.amount).toFixed(2)}</td>
+                            <td className="py-3.5 px-3 font-mono text-slate-400 font-bold">{dep.utr}</td>
+                            <td className="py-3.5 px-3">
+                              {dep.status === "pending" && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                  <Clock className="w-3 h-3" />
+                                  <span>Pending Verification</span>
+                                </span>
+                              )}
+                              {dep.status === "approved" && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>Approved &amp; Credited</span>
+                                </span>
+                              )}
+                              {dep.status === "rejected" && (
+                                <div className="space-y-1">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                    <X className="w-3 h-3" />
+                                    <span>Rejected</span>
+                                  </span>
+                                  {dep.rejection_reason && (
+                                    <p className="text-[11px] text-rose-400 font-semibold max-w-xs truncate">
+                                      {dep.rejection_reason}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-3">
+                              <button
+                                type="button"
+                                onClick={() => setPreviewScreenshotId(dep.id)}
+                                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>View Receipt</span>
+                              </button>
+                            </td>
+                            <td className="py-3.5 px-3 text-slate-500">
+                              {new Date(dep.created_at).toLocaleString("en-IN", {
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>
       </main>
+
+      {/* Screenshot Preview Modal */}
+      {previewScreenshotId && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-2xl relative">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <FileImage className="w-4 h-4 text-pink-400" />
+                <span>Payment Screenshot ({previewScreenshotId})</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPreviewScreenshotId(null)}
+                className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center max-h-[480px]">
+              <img
+                src={`/api/wallet/deposits/${previewScreenshotId}/screenshot`}
+                alt="Payment Screenshot Receipt"
+                className="w-full h-full object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

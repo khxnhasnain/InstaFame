@@ -131,7 +131,7 @@ export default function YouTubePlayerModal({
           <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-1 border-t border-zinc-800/60">
             <div className="flex items-center gap-1 text-emerald-400 font-semibold">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Playing securely in InstaFame viewer</span>
+              <span>Playing securely in Viralora viewer</span>
             </div>
             <a
               href={`https://www.youtube.com/watch?v=${video.id}`}

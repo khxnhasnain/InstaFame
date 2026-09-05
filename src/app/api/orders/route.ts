@@ -44,12 +44,13 @@ export async function POST(request: NextRequest) {
           { status: res.status }
         );
       }
-    } catch {
-      // Backend offline fallback
+    } catch (err: any) {
+      console.error("Backend order connection error:", err);
+      return NextResponse.json(
+        { error: "Backend database service is unreachable. Please ensure the backend server is running." },
+        { status: 503 }
+      );
     }
-
-
-    return NextResponse.json({ success: true, data: body, message: "Order recorded locally" });
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || "Failed to record order" }, { status: 500 });
   }
@@ -74,12 +75,19 @@ export async function PATCH(request: NextRequest) {
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         return NextResponse.json(data);
+      } else {
+        return NextResponse.json(
+          { error: data.detail || data.error || "Failed to update order status" },
+          { status: res.status }
+        );
       }
-    } catch {
-      // Backend offline fallback
+    } catch (err: any) {
+      console.error("Backend order PATCH connection error:", err);
+      return NextResponse.json(
+        { error: "Backend database service is unreachable. Please ensure the backend server is running." },
+        { status: 503 }
+      );
     }
-
-    return NextResponse.json({ success: true, data: body, message: "Order status updated locally" });
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || "Failed to update order" }, { status: 500 });
   }

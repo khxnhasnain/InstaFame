@@ -149,8 +149,20 @@ export default function InstagramBoostModal({
     loadDynamicPricing();
   }, [type, isFollowers, isViews, session?.user?.email]);
 
+  // Real-time wallet update listener
+  useEffect(() => {
+    const handleWalletUpdated = (e: any) => {
+      if (typeof e.detail?.balance === "number") {
+        setWalletBalance(e.detail.balance);
+      }
+    };
+    window.addEventListener("wallet_updated", handleWalletUpdated);
+    return () => window.removeEventListener("wallet_updated", handleWalletUpdated);
+  }, []);
 
   // Handle custom manual input changes
+  const minAllowed = isFollowers ? 50 : 1000;
+
   const handleCustomInputChange = (val: string) => {
     setCustomAmountInput(val);
     setInsufficientError(null);
@@ -159,31 +171,36 @@ export default function InstagramBoostModal({
       setCustomError("Please enter a valid number");
       return;
     }
-    if (num < 1000) {
-      setCustomError("Minimum order is 1,000 (1K)");
+    if (num < minAllowed) {
+      setCustomError(`Minimum order is ${minAllowed.toLocaleString()} ${isFollowers ? "followers" : ""}`);
       return;
     }
-    if (num % 1000 !== 0) {
-      setCustomError("Amount must be in multiples of 1,000 (e.g. 2,000, 5,000, 15,000)");
+    if (num > 500000) {
+      setCustomError("Maximum order limit is 500,000");
+      return;
+    }
+    if (!isFollowers && num % 1000 !== 0) {
+      setCustomError("Amount must be in multiples of 1,000 (e.g., 2,000, 5,000)");
       return;
     }
     setCustomError("");
   };
 
   const handleCustomQuickAdd = (increment: number) => {
-    const current = parseInt(customAmountInput, 10) || 1000;
-    const nextVal = Math.max(1000, current + increment);
-    const rounded = Math.round(nextVal / 1000) * 1000;
-    setCustomAmountInput(String(rounded));
+    const current = parseInt(customAmountInput, 10) || minAllowed;
+    const step = isFollowers ? (current < 1000 ? 50 : 1000) : 1000;
+    const actualInc = increment > 0 ? step : -step;
+    const nextVal = Math.max(minAllowed, current + actualInc);
+    setCustomAmountInput(String(nextVal));
     setCustomError("");
     setInsufficientError(null);
   };
 
   // Determine current active boost amount and price
-  const parsedCustom = parseInt(customAmountInput, 10) || 1000;
-  const isCustomValid = !isNaN(parsedCustom) && parsedCustom >= 1000 && parsedCustom % 1000 === 0;
+  const parsedCustom = parseInt(customAmountInput, 10) || minAllowed;
+  const isCustomValid = !isNaN(parsedCustom) && parsedCustom >= minAllowed && parsedCustom <= 500000 && (isFollowers || parsedCustom % 1000 === 0);
 
-  const currentBoostAmount = isCustomMode ? (isCustomValid ? parsedCustom : 1000) : selectedPackage.amount;
+  const currentBoostAmount = isCustomMode ? (isCustomValid ? parsedCustom : minAllowed) : selectedPackage.amount;
   const currentBoostPrice = isCustomMode
     ? calculatePriceForAmount(currentBoostAmount, ratePer1k)
     : (selectedPackage.price ?? calculatePriceForAmount(selectedPackage.amount, ratePer1k));
@@ -196,7 +213,18 @@ export default function InstagramBoostModal({
 
   const handleStartBoost = async () => {
     if (isCustomMode && !isCustomValid) {
-      setCustomError("Please enter a valid amount (minimum 1,000 in multiples of 1,000)");
+      setCustomError(isFollowers ? "Please enter a valid amount (minimum 50 followers)" : "Please enter a valid amount (minimum 1,000 in multiples of 1,000)");
+      return;
+    }
+
+    const emailToUse = session?.user?.email;
+    if (!emailToUse) {
+      setInsufficientError("Please sign in with your Google account to place a boost order.");
+      return;
+    }
+
+    if (walletBalance !== null && walletBalance < currentBoostPrice) {
+      setInsufficientError(`Insufficient wallet balance (₹${walletBalance.toFixed(2)}). Required: ₹${currentBoostPrice.toFixed(2)}. Please recharge your wallet first.`);
       return;
     }
 
@@ -205,6 +233,7 @@ export default function InstagramBoostModal({
 
     // Call addOrder which executes database deduction first
     const res = await addOrder({
+      userEmail: emailToUse,
       type,
       username: targetUsername,
       avatarUrl,
@@ -242,7 +271,7 @@ export default function InstagramBoostModal({
 
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider bg-white/20 backdrop-blur-md px-3 py-1 rounded-full w-fit mb-2">
             <Zap className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
-            <span>InstaFame AI Growth Booster</span>
+            <span>Viralora AI Growth Booster</span>
           </div>
 
           <h2 className="text-2xl font-extrabold tracking-tight">
@@ -365,7 +394,7 @@ export default function InstagramBoostModal({
                 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer"
               >
                 <Sliders className="w-3.5 h-3.5 text-indigo-500" />
-                <span>Or Enter Custom Quantity (Multiples of 1,000)</span>
+                <span>{isFollowers ? "Or Enter Custom Follower Count (Min 50)" : "Or Enter Custom Quantity (Multiples of 1,000)"}</span>
               </label>
 
               <button
@@ -386,12 +415,12 @@ export default function InstagramBoostModal({
                 <div className="relative flex-1">
                   <input
                     type="number"
-                    min="1000"
-                    step="1000"
+                    min={minAllowed}
+                    step={isFollowers ? "50" : "1000"}
                     value={customAmountInput}
                     onFocus={() => setIsCustomMode(true)}
                     onChange={(e) => handleCustomInputChange(e.target.value)}
-                    placeholder="e.g. 5000, 15000, 50000"
+                    placeholder={isFollowers ? "e.g. 50, 250, 1000, 5000" : "e.g. 5000, 15000, 50000"}
                     className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-extrabold text-slate-900 dark:text-white focus:outline-hidden focus:border-indigo-500 shadow-inner"
                   />
                   <span className="absolute right-3 top-2.5 text-xs font-bold text-slate-400">
@@ -404,10 +433,10 @@ export default function InstagramBoostModal({
                     type="button"
                     onClick={() => {
                       setIsCustomMode(true);
-                      handleCustomQuickAdd(-1000);
+                      handleCustomQuickAdd(-1);
                     }}
                     className="w-9 h-9 flex items-center justify-center rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold cursor-pointer"
-                    title="-1,000"
+                    title={isFollowers ? "-50 / -1,000" : "-1,000"}
                   >
                     <Minus className="w-4 h-4" />
                   </button>
@@ -415,10 +444,10 @@ export default function InstagramBoostModal({
                     type="button"
                     onClick={() => {
                       setIsCustomMode(true);
-                      handleCustomQuickAdd(1000);
+                      handleCustomQuickAdd(1);
                     }}
                     className="w-9 h-9 flex items-center justify-center rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold cursor-pointer"
-                    title="+1,000"
+                    title={isFollowers ? "+50 / +1,000" : "+1,000"}
                   >
                     <Plus className="w-4 h-4" />
                   </button>
@@ -427,7 +456,10 @@ export default function InstagramBoostModal({
 
               {/* Quick Stepper Pills */}
               <div className="flex flex-wrap items-center gap-1.5">
-                {[2000, 5000, 15000, 25000, 50000, 250000].map((quick) => (
+                {(isFollowers
+                  ? [50, 100, 500, 1000, 5000, 10000, 25000]
+                  : [2000, 5000, 15000, 25000, 50000, 250000]
+                ).map((quick) => (
                   <button
                     key={quick}
                     type="button"

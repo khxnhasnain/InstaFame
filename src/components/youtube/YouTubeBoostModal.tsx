@@ -138,39 +138,23 @@ export default function YouTubeBoostModal({
     setIsOrdering(true);
 
     try {
-      const orderPayload = {
-        user_email: session?.user?.email || "anonymous@instafame.com",
-        service_type: isSubs ? "followers" : isViews ? "views" : "likes",
-        target_username: targetHandle.replace(/^@/, ""),
-        target_post_url: targetVideo ? `https://www.youtube.com/watch?v=${targetVideo.id}` : "",
-        package_amount: currentBoostAmount,
-        package_label: isCustomMode
-          ? `${currentBoostAmount.toLocaleString()} ${serviceLabel} (Custom)`
-          : `${selectedPackage.label} (YouTube)`,
-        price: currentPrice,
-        initial_count: initialCount,
-        approx_after_count: initialCount + currentBoostAmount,
-      };
-
-      const res = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(orderPayload),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.detail || data.error || "Failed to place order.");
+      const emailToUse = session?.user?.email;
+      if (!emailToUse) {
+        throw new Error("Please sign in with your Google account to place a boost order.");
       }
 
-      // Add to local CartContext
-      await addOrder({
+      const packageLabel = isCustomMode
+        ? `${currentBoostAmount.toLocaleString()} ${serviceLabel} (Custom)`
+        : `${selectedPackage.label} (YouTube)`;
+
+      // Add to CartContext which processes database order and wallet deduction
+      const res = await addOrder({
+        userEmail: emailToUse,
         type: isSubs ? "followers" : isViews ? "views" : "likes",
         username: targetHandle.replace(/^@/, ""),
         avatarUrl: avatarUrl || "",
         packageAmount: currentBoostAmount,
-        packageLabel: orderPayload.package_label,
+        packageLabel: packageLabel,
         price: currentPrice,
         initialCount: initialCount,
         approxAfterCount: initialCount + currentBoostAmount,
@@ -178,13 +162,8 @@ export default function YouTubeBoostModal({
         postThumbnail: targetVideo ? targetVideo.thumbnailUrl : undefined,
       });
 
-      // Dispatch wallet balance update event
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("wallet_updated", {
-            detail: { balance: (walletBalance || currentPrice) - currentPrice },
-          })
-        );
+      if (!res.success) {
+        throw new Error(res.error || "Failed to place order.");
       }
 
       setOrderSuccess(true);

@@ -1,6 +1,6 @@
-# InstaFame - Full-Stack Social Profile Viewer Application
+# Viralora - Full-Stack Social Profile Viewer Application
 
-InstaFame is a Next.js full-stack web application built with React, Tailwind CSS, NextAuth.js, and custom API routes. It features **pixel-perfect UI replicas** of both **Instagram** and **Facebook** user profiles with debounced search, responsive layouts, data fallbacks, and error handling.
+Viralora is a Next.js full-stack web application built with React, Tailwind CSS, NextAuth.js, and custom API routes. It features **pixel-perfect UI replicas** of both **Instagram** and **Facebook** user profiles with debounced search, responsive layouts, data fallbacks, and error handling.
 
 ---
 
